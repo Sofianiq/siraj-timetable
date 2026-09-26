@@ -15,7 +15,7 @@ service cloud.firestore {
 
     function signedIn() { return request.auth != null; }
     function isSuperAdmin() {
-      return signedIn() && request.auth.token.email in ['admin@example.com'];
+      return signedIn() && request.auth.token.email in ['sofian.7.4.96@gmail.com'];
     }
     function profilePath() { return /databases/$(database)/documents/users/$(request.auth.uid); }
     function hasProfile() { return signedIn() && exists(profilePath()); }
