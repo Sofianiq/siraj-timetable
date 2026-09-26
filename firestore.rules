@@ -1,0 +1,49 @@
+rules_version = '2';
+
+// =====================================================================
+// قواعد أمان قاعدة البيانات (Firestore) — نظام إدارة الجداول الدراسية
+//
+//  • القراءة للجميع (حتى يستطيع الطلبة رؤية الجداول عبر رابط المشاركة بدون حساب).
+//  • معاون العميد (admin): تعديل كل شيء.
+//  • مسؤول القسم (dept): تعديل المراحل والشعب والمواد والمحاضرات والأساتذة التابعة لقسمه فقط.
+//  • العرض فقط (viewer): لا يعدّل شيئاً.
+//
+//  ⚠️ مهم: استبدل admin@example.com أدناه ببريد معاون العميد نفسه المكتوب في js/config.js
+// =====================================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function isSuperAdmin() {
+      return signedIn() && request.auth.token.email in ['admin@example.com'];
+    }
+    function profilePath() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function hasProfile() { return signedIn() && exists(profilePath()); }
+    function profile() { return get(profilePath()).data; }
+    function isAdmin() { return isSuperAdmin() || (hasProfile() && profile().role == 'admin'); }
+    function isDeptHead() { return hasProfile() && profile().role == 'dept' && profile().deptId != null; }
+    function ownDept(data) { return isDeptHead() && data.deptId == profile().deptId; }
+
+    // الحقول الأساسية لملف المستخدم لا يغيّرها إلا المشرف
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow create: if signedIn() && request.auth.uid == uid
+                    && request.resource.data.role == 'viewer'
+                    && request.resource.data.email == request.auth.token.email;
+      allow update, delete: if isAdmin();
+    }
+
+    // بيانات مشتركة يعدّلها المشرف فقط
+    match /{col}/{id} {
+      allow read: if col in ['colleges', 'departments', 'stages', 'groups', 'teachers', 'rooms', 'subjects', 'sessions', 'settings'];
+      allow write: if isAdmin() && col in ['colleges', 'departments', 'stages', 'groups', 'teachers', 'rooms', 'subjects', 'sessions', 'settings'];
+    }
+
+    // صلاحيات مسؤول القسم على بيانات قسمه
+    match /{col}/{id} {
+      allow create: if col in ['stages', 'groups', 'subjects', 'sessions', 'teachers'] && ownDept(request.resource.data);
+      allow update: if col in ['stages', 'groups', 'subjects', 'sessions', 'teachers'] && ownDept(resource.data) && ownDept(request.resource.data);
+      allow delete: if col in ['stages', 'groups', 'subjects', 'sessions', 'teachers'] && ownDept(resource.data);
+    }
+  }
+}
