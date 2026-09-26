@@ -8,7 +8,7 @@
  *
  * ملاحظة: بيانات firebaseConfig ليست سرية، وحماية البيانات تتم عبر قواعد الأمان (firestore.rules).
  */
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: "AIzaSyCnVD7D3JwfEil9RvNI2FLrCVkmjxZrtE4",
   authDomain: "siraj-timetable.firebaseapp.com",
   projectId: "siraj-timetable",
