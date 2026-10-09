@@ -1,20 +1,37 @@
 /**
  * صفحة التوليد التلقائي للجداول.
  */
-import { store, byId, settings, batchWrite, uid, canEditDept, myDeptId } from '../store.js';
+import { store, byId, settings, batchWrite, uid, canEditDept, myDeptId, collegeOfDept } from '../store.js';
 import { generate } from '../generator.js';
 import { checkSession, hasErrors } from '../conflicts.js';
 import { esc, el, $, $$, toast, confirmDialog } from '../ui.js';
 import { STAGE_NAMES, SHIFTS } from '../timeutil.js';
-import { currentTerm, termSessions, sortByName, groupLabel, termLabel, ctx } from '../model.js';
+import { currentTerm, termSessions, groupLabel, termLabel, ctx, currentCollegeId, managedColleges, deptsOfCollege } from '../model.js';
 
-const form = { deptId: '', levels: [1, 2, 3, 4], shifts: ['morning', 'evening'], keepManual: true };
+/** القيمة ALL في اختيار القسم تعني: كل أقسام الكلية التي يحق للمستخدم تعديلها */
+const ALL = '__all__';
+const form = { collegeId: '', deptId: '', levels: [1, 2, 3, 4, 5, 6], shifts: ['morning', 'evening'], keepManual: true };
+
+/** الأقسام المشمولة بالتوليد */
+function scopeDepts() {
+  const editable = deptsOfCollege(form.collegeId).filter((d) => canEditDept(d.id));
+  return form.deptId === ALL ? editable : editable.filter((d) => d.id === form.deptId);
+}
 let lastResult = null;
 
 export function renderGenerate(container) {
   const st = settings();
-  const depts = sortByName(store.data.departments).filter((d) => canEditDept(d.id));
-  if (!form.deptId || !depts.some((d) => d.id === form.deptId)) form.deptId = myDeptId() || depts[0]?.id || '';
+  const colleges = managedColleges().filter((c) => deptsOfCollege(c.id).some((d) => canEditDept(d.id)));
+  if (!colleges.some((c) => c.id === form.collegeId)) {
+    const cur = currentCollegeId();
+    form.collegeId = (colleges.some((c) => c.id === cur) && cur) || collegeOfDept(myDeptId()) || colleges[0]?.id || '';
+  }
+  const depts = deptsOfCollege(form.collegeId).filter((d) => canEditDept(d.id));
+  if (form.deptId !== ALL && !depts.some((d) => d.id === form.deptId)) {
+    form.deptId = depts.some((d) => d.id === myDeptId()) ? myDeptId() : depts.length > 1 ? ALL : depts[0]?.id || '';
+  }
+  const deptIds = new Set(scopeDepts().map((d) => d.id));
+  const levelsAvail = [1, 2, 3, 4, 5, 6].filter((l) => store.data.stages.some((s) => deptIds.has(s.deptId) && Number(s.level) === l));
   container.innerHTML = '';
   const page = el(`<div class="page">
     <div class="page-head"><h2>⚙️ التوليد التلقائي للجداول</h2><span class="term-badge">${esc(termLabel())}</span></div>
@@ -23,8 +40,12 @@ export function renderGenerate(container) {
       شغور القاعات والمختبرات على مستوى الجامعة كلها (بما فيها حجوزات الأقسام والكليات الأخرى)، عدم تداخل محاضرات الشعبة،
       سعة القاعة، نوع المختبر، وقت الدوام الصباحي/المسائي، وتوزيع المادة على أيام مختلفة وتقليل الفراغات.</p>
       <div class="form-grid">
-        <div class="field"><label>القسم</label><select id="dept">${depts.map((d) => `<option value="${d.id}" ${d.id === form.deptId ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}</select></div>
-        <div class="field"><label>المراحل</label><div class="checklist inline">${[1, 2, 3, 4, 5, 6].filter((l) => store.data.stages.some((s) => s.deptId === form.deptId && Number(s.level) === l)).map((l) =>
+        <div class="field"><label>الكلية</label><select id="college">${colleges.map((c) => `<option value="${c.id}" ${c.id === form.collegeId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>القسم</label><select id="dept">
+          ${depts.length > 1 ? `<option value="${ALL}" ${form.deptId === ALL ? 'selected' : ''}>كل أقسام الكلية (${depts.length})</option>` : ''}
+          ${depts.map((d) => `<option value="${d.id}" ${d.id === form.deptId ? 'selected' : ''}>${esc(d.general ? `${d.name} (الكلية كاملة)` : d.name)}</option>`).join('')}</select>
+          <small class="muted">تُستخدم مواد القسم/الكلية المختار فقط.</small></div>
+        <div class="field"><label>المراحل</label><div class="checklist inline">${levelsAvail.map((l) =>
           `<label class="chk"><input type="checkbox" name="lvl" value="${l}" ${form.levels.includes(l) ? 'checked' : ''}> ${STAGE_NAMES[l]}</label>`).join('')}</div></div>
         <div class="field"><label>نوع الدراسة</label><div class="checklist inline">${Object.entries(SHIFTS).map(([k, v]) =>
           `<label class="chk"><input type="checkbox" name="shift" value="${k}" ${form.shifts.includes(k) ? 'checked' : ''}> ${v}</label>`).join('')}</div></div>
@@ -39,34 +60,37 @@ export function renderGenerate(container) {
   </div>`);
   container.appendChild(page);
 
+  $('#college', page).onchange = (e) => { form.collegeId = e.target.value; form.deptId = ''; lastResult = null; renderGenerate(container); };
   $('#dept', page).onchange = (e) => { form.deptId = e.target.value; lastResult = null; renderGenerate(container); };
   $('#run', page).onclick = () => run(page);
-  if (lastResult && lastResult.deptId === form.deptId) showResult(page, lastResult);
+  if (lastResult && lastResult.scopeKey === `${form.collegeId}|${form.deptId}`) showResult(page, lastResult);
 }
 
 function scope(page) {
   form.levels = $$('[name=lvl]:checked', page).map((i) => Number(i.value));
   form.shifts = $$('[name=shift]:checked', page).map((i) => i.value);
   form.keepManual = $('#keep', page).checked;
-  const stages = store.data.stages.filter((s) => s.deptId === form.deptId && form.levels.includes(Number(s.level)));
+  const deptIds = new Set(scopeDepts().map((d) => d.id));
+  const stages = store.data.stages.filter((s) => deptIds.has(s.deptId) && form.levels.includes(Number(s.level)));
   const stageIds = new Set(stages.map((s) => s.id));
   const groups = store.data.groups.filter((g) => stageIds.has(g.stageId) && form.shifts.includes(g.shift || 'morning'));
-  return { stages, groups, groupIds: new Set(groups.map((g) => g.id)) };
+  return { deptIds, stages, groups, groupIds: new Set(groups.map((g) => g.id)) };
 }
 
 function run(page) {
   const st = settings();
-  const { stages, groups, groupIds } = scope(page);
+  const { deptIds, stages, groups, groupIds } = scope(page);
   if (!groups.length) { toast('لا توجد شعب ضمن النطاق المحدد', 'warn'); return; }
   const term = currentTerm();
   const sem = Number(st.semester || 1);
   const all = termSessions(term);
-  const inScope = (s) => s.deptId === form.deptId && s.kind !== 'external' && (s.groupIds || []).length && s.groupIds.every((g) => groupIds.has(g));
+  const inScope = (s) => deptIds.has(s.deptId) && s.kind !== 'external' && (s.groupIds || []).length && s.groupIds.every((g) => groupIds.has(g));
   const toRemove = all.filter((s) => inScope(s) && !s.locked && (s.auto || !form.keepManual));
   const removeIds = new Set(toRemove.map((s) => s.id));
   const fixed = all.filter((s) => !removeIds.has(s.id));
   const keptInScope = fixed.filter(inScope);
-  const subjects = store.data.subjects.filter((s) => s.deptId === form.deptId && Number(s.semester || 1) === sem && form.levels.includes(Number(s.stageLevel)));
+  // مواد أقسام النطاق فقط (لا تدخل مواد كلية أو قسم آخر)
+  const subjects = store.data.subjects.filter((s) => deptIds.has(s.deptId) && Number(s.semester || 1) === sem && form.levels.includes(Number(s.stageLevel)));
   if (!subjects.length) { toast(`لا توجد مواد للفصل ${sem} في المراحل المحددة`, 'warn'); return; }
 
   const btn = $('#run', page);
@@ -76,14 +100,14 @@ function run(page) {
       const res = generate({
         subjects, stages, groups, teachers: store.data.teachers, rooms: store.data.rooms,
         fixedSessions: fixed, keptInScope, settings: st,
-        deptCollege: byId('departments', form.deptId)?.collegeId,
+        deptCollege: form.collegeId,
         options: {
           maxTheoryBlock: Number($('#maxT', page).value) || 2,
           maxPracticalBlock: Number($('#maxP', page).value) || 3,
           maxDailyHours: Number($('#maxD', page).value) || 6,
         },
       });
-      lastResult = { ...res, deptId: form.deptId, toRemove, term };
+      lastResult = { ...res, deptId: form.deptId, collegeId: form.collegeId, scopeKey: `${form.collegeId}|${form.deptId}`, toRemove, term };
       showResult(page, lastResult);
     } catch (e) {
       console.error(e);
@@ -111,10 +135,10 @@ function showResult(page, res) {
     ${res.unplaced.length ? `<h4>محاضرات لم يُعثر لها على مكان</h4><div class="table-wrap"><table class="mini-table">
       <thead><tr><th>المادة</th><th>النوع</th><th>الشعب</th><th>المدة</th><th>السبب المحتمل</th></tr></thead><tbody>
       ${res.unplaced.map((u) => `<tr><td>${esc(u.subjectName)}</td><td>${u.kind === 'practical' ? 'عملي' : 'نظري'}</td>
-        <td>${esc(u.groupIds.map((g) => groupLabel(byId('groups', g))).join(' + '))}</td><td>${u.duration / 60} س</td><td>${esc(u.reason)}</td></tr>`).join('')}
+        <td>${esc(u.groupIds.map((g) => groupLabel(byId('groups', g), { withDept: res.deptId === ALL })).join(' + '))}</td><td>${u.duration / 60} س</td><td>${esc(u.reason)}</td></tr>`).join('')}
       </tbody></table></div><p class="muted">اقتراحات: أضف قاعة/مختبراً، وسّع أوقات توفر الأستاذ، أو قلل مدة الكتلة، ثم أعد التوليد. ويمكنك أيضاً إضافة هذه المحاضرات يدوياً.</p>` : ''}
     <h4>الساعات المجدولة لكل شعبة</h4>
-    <div class="summary">${[...perGroup].map(([g, h]) => `<span class="chip">${esc(groupLabel(byId('groups', g)))}: ${h} س</span>`).join('') || '<span class="muted">—</span>'}</div>
+    <div class="summary">${[...perGroup].map(([g, h]) => `<span class="chip">${esc(groupLabel(byId('groups', g), { withDept: res.deptId === ALL }))}: ${h} س</span>`).join('') || '<span class="muted">—</span>'}</div>
     <div class="toolbar"><button class="btn btn-primary" id="commit">💾 اعتماد وحفظ الجدول</button><button class="btn" id="discard">تجاهل</button></div>
   </div>`);
   box.appendChild(card);
@@ -139,7 +163,7 @@ function showResult(page, res) {
       await batchWrite(ops);
       toast('تم حفظ الجدول. يمكنك الآن تعديله يدوياً من صفحة الجداول.', 'success', 5000);
       lastResult = null;
-      location.hash = `#/schedule?type=dept&id=${res.deptId}`;
+      location.hash = res.deptId === ALL ? `#/schedule?type=college&id=${res.collegeId}` : `#/schedule?type=dept&id=${res.deptId}`;
     } catch (e) { toast('تعذر الحفظ: ' + e.message, 'error'); }
   };
 }

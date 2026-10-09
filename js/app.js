@@ -2,14 +2,14 @@
  * نقطة البداية: تهيئة البيانات، الهيكل العام للصفحة، التنقل بين الصفحات، وإعادة الرسم عند أي تغيير (مزامنة فورية).
  */
 import { store, initStore, onChange, onAuth, role, isAdmin, canEdit, batchWrite, uid, signOut } from './store.js';
-import { APP_TITLE, DEVELOPER, UNIVERSITY, COLLEGE } from './config.js';
+import { APP_TITLE, APP_NAME, DEVELOPER, UNIVERSITY } from './branding.js';
 import { esc, el, $, $$, toast } from './ui.js';
 import { renderSchedule } from './views/schedule.js';
 import { renderEntity, renderStages } from './views/crud.js';
 import { renderGenerate } from './views/generate.js';
 import { renderDashboard, renderConflicts, renderUsers, renderSettings, renderLogin, ROLE_NAMES } from './views/pages.js';
-import { seedOps } from './seed/radiology.js';
-import { deptName } from './model.js';
+import { seedOps, migrationOps } from './seed/radiology.js';
+import { deptName, collegeShort, managedColleges, currentCollegeId, setCurrentCollege } from './model.js';
 
 const NAV = [
   { path: 'dashboard', label: 'لوحة التحكم', icon: '🏠' },
@@ -60,10 +60,15 @@ function shell() {
       <button class="icon-btn menu-btn" id="menuBtn" aria-label="القائمة">☰</button>
       <a class="brand" href="#/">
         <span class="logo" aria-hidden="true">🗓</span>
-        <span class="brand-text"><b>نظام إدارة الجداول الدراسية</b><small>${esc(UNIVERSITY)} - ${esc(COLLEGE)}</small></span>
+        <span class="brand-text"><b>${esc(APP_NAME)}</b><small>${esc(UNIVERSITY)}</small></span>
       </a>
+      <label class="college-switch" title="اختر الكلية التي تعمل عليها">
+        <span aria-hidden="true">🏛</span>
+        <select id="collegeSel" aria-label="الكلية"></select>
+      </label>
       <span class="spacer"></span>
       <span id="sync" class="sync" title="حالة المزامنة"></span>
+      <button class="icon-btn theme-btn" id="themeBtn" title="الوضع الفاتح / الداكن" aria-label="تبديل المظهر"></button>
       <div id="userBox" class="user-box"></div>
     </header>
     <div class="layout">
@@ -73,10 +78,42 @@ function shell() {
     <div id="scrim" class="scrim no-print"></div>
     <footer class="footer no-print">إعداد وتطوير: ${esc(DEVELOPER)}</footer>
   </div>`));
+  applyTheme();
   $('#menuBtn').onclick = () => document.body.classList.toggle('nav-open');
   $('#scrim').onclick = () => document.body.classList.remove('nav-open');
+  $('#collegeSel').onchange = (e) => { setCurrentCollege(e.target.value); draw(true); };
+  $('#themeBtn').onclick = () => {
+    const order = ['auto', 'light', 'dark'];
+    const next = order[(order.indexOf(getTheme()) + 1) % order.length];
+    try { localStorage.setItem(THEME_KEY, next); } catch { /* تجاهل */ }
+    applyTheme();
+    toast(next === 'auto' ? 'المظهر: تلقائي حسب الجهاز' : next === 'dark' ? 'المظهر: داكن' : 'المظهر: فاتح', 'info', 1500);
+  };
   window.addEventListener('online', updateSync);
   window.addEventListener('offline', updateSync);
+  window.addEventListener('siraj:college', () => renderCollegeSwitch());
+}
+
+/* ------------------------------ المظهر (فاتح / داكن) ------------------------------ */
+const THEME_KEY = 'siraj-theme';
+function getTheme() { try { return localStorage.getItem(THEME_KEY) || 'auto'; } catch { return 'auto'; } }
+function applyTheme() {
+  const t = getTheme();
+  if (t === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = t;
+  const b = document.getElementById('themeBtn');
+  if (b) b.textContent = t === 'dark' ? '🌙' : t === 'light' ? '☀️' : '🌓';
+}
+
+/** قائمة اختيار الكلية في الشريط العلوي */
+function renderCollegeSwitch() {
+  const sel = $('#collegeSel');
+  if (!sel) return;
+  const list = managedColleges();
+  const cur = currentCollegeId();
+  sel.innerHTML = `<option value="">كل الكليات</option>` +
+    list.map((c) => `<option value="${esc(c.id)}" ${c.id === cur ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
+  sel.parentElement.hidden = list.length < 2;
 }
 
 function updateSync() {
@@ -101,11 +138,12 @@ function renderNav(active) {
   }
   nav.onclick = (e) => { if (e.target.closest('a')) document.body.classList.remove('nav-open'); };
 
+  renderCollegeSwitch();
   const ub = $('#userBox');
-  if (store.mode === 'local') ub.innerHTML = '<span class="role-badge">مشرف (محلي)</span>';
+  if (store.mode === 'local') ub.innerHTML = '<span class="role-badge">مدير النظام (محلي)</span>';
   else if (store.user) {
     ub.innerHTML = `<span class="user-name">${esc(store.user.name || store.user.email)}</span>
-      <span class="role-badge">${esc(ROLE_NAMES[r] || r)}${r === 'dept' && store.profile?.deptId ? ` — ${esc(deptName(store.profile.deptId))}` : ''}</span>
+      <span class="role-badge">${esc(ROLE_NAMES[r] || r)}${r === 'dept' && store.profile?.deptId ? ` — ${esc(deptName(store.profile.deptId))}` : ''}${r === 'college' && store.profile?.collegeId ? ` — ${esc(collegeShort(store.profile.collegeId))}` : ''}</span>
       <button class="btn btn-sm" id="logout">خروج</button>`;
     $('#logout').onclick = async () => { await signOut(); location.hash = '#/public'; };
   } else ub.innerHTML = '<a class="btn btn-sm btn-primary" href="#/login">دخول</a>';
@@ -153,6 +191,7 @@ function scheduleRedraw() {
   clearTimeout(redrawTimer);
   redrawTimer = setTimeout(() => {
     if (document.querySelector('.modal-backdrop') || document.querySelector('.tt-block.dragging')) { scheduleRedraw(); return; }
+    renderCollegeSwitch();
     draw(false);
   }, 120);
 }
@@ -166,12 +205,26 @@ async function autoSeed() {
   seeded = true;
   try {
     await batchWrite(seedOps(uid));
-    toast('تم إدراج البيانات الأولية: الأقسام الخمسة والمراحل ومواد قسم تقنيات الأشعة والسونار. راجع الساعات والقاعات.', 'success', 8000);
+    toast('تم إدراج البيانات الأولية: ثلاث كليات وأقسامها ومراحلها ومواد قسم تقنيات الأشعة والسونار. راجع الساعات والقاعات.', 'success', 8000);
   } catch (e) { console.error(e); toast('تعذر إدراج البيانات الأولية: ' + e.message, 'error'); }
+}
+
+/** ترقية البيانات الموجودة إلى نظام الكليات المتعددة (مرة واحدة، بواسطة مدير النظام) */
+let migrating = false;
+async function autoMigrate() {
+  if (migrating || !isAdmin()) return;
+  const ops = migrationOps(store.data, uid);
+  if (!ops.length) return;
+  migrating = true;
+  try {
+    await batchWrite(ops);
+    toast('تم تحديث النظام لدعم عدة كليات، وأُضيفت كليتا الصيدلة وطب الأسنان.', 'success', 8000);
+  } catch (e) { console.error(e); migrating = false; toast('تعذر تحديث بيانات الكليات: ' + e.message, 'error'); }
 }
 
 /* ------------------------------ البدء ------------------------------ */
 async function main() {
+  window.__appStarted = true;
   shell();
   $('#main').innerHTML = '<div class="loading"><div class="spinner"></div><p>جارٍ تحميل البيانات…</p></div>';
   try {
@@ -183,6 +236,7 @@ async function main() {
   }
   updateSync();
   await autoSeed();
+  await autoMigrate();
 
   onChange((col, info) => {
     // إشعار عند وصول تعديل من مستخدم آخر
@@ -192,7 +246,7 @@ async function main() {
     }
     scheduleRedraw();
   });
-  onAuth(() => { autoSeed(); route(); });
+  onAuth(async () => { await autoSeed(); await autoMigrate(); route(); });
   window.addEventListener('hashchange', route);
   route();
 }

@@ -2,42 +2,64 @@
  * صفحات: لوحة التحكم، التعارضات، المستخدمون والصلاحيات، الإعدادات والنسخ الاحتياطي، تسجيل الدخول.
  */
 import {
-  store, byId, settings, batchWrite, set, isAdmin, canEdit, myDeptId, role,
+  store, byId, settings, batchWrite, set, isAdmin, canEdit, myDeptId, role, collegeOfDept,
   signIn, signUp, signOut, resetPassword, exportAll, importAll, uid,
 } from '../store.js';
 import { checkAll } from '../conflicts.js';
 import { esc, el, $, $$, toast, confirmDialog, download, modal } from '../ui.js';
 import { DAY_NAMES, SEMESTERS, toHHMM, toMinutes, formatRange } from '../timeutil.js';
-import { ctx, termSessions, sortByName, deptName, groupsSorted, subjectName, termLabel, currentTerm } from '../model.js';
+import {
+  ctx, termSessions, deptName, subjectName, termLabel, currentTerm, currentCollegeId, setCurrentCollege,
+  managedColleges, deptsOfCollege, deptOptionsHTML, collegeName, collegeShort,
+} from '../model.js';
 import { openEditor } from './schedule.js';
 import { seedOps } from '../seed/radiology.js';
 
-export const ROLE_NAMES = { admin: 'معاون العميد (مشرف عام)', dept: 'مسؤول قسم', viewer: 'عرض فقط', guest: 'زائر' };
+export const ROLE_NAMES = {
+  admin: 'مدير النظام (كل الكليات)', college: 'معاون عميد (كلية واحدة)', dept: 'مسؤول قسم', viewer: 'عرض فقط', guest: 'زائر',
+};
 
 /* =============================== لوحة التحكم =============================== */
 export function renderDashboard(container) {
-  const sessions = termSessions();
-  const conflicts = checkAll(sessions, ctx());
-  const issues = [...conflicts.values()].flat();
-  const errors = issues.filter((i) => i.level === 'error').length / 2; // كل تعارض يظهر للطرفين
+  const cur = currentCollegeId();
+  const inCollege = (deptId) => !cur || collegeOfDept(deptId) === cur;
+  const allSessions = termSessions();
+  const conflicts = checkAll(allSessions, ctx());
+  const sessions = allSessions.filter((x) => (x.deptId ? inCollege(x.deptId) : !cur));
+  const issues = sessions.flatMap((x) => conflicts.get(x.id) || []);
+  const errors = Math.ceil(issues.filter((i) => i.level === 'error').length / 2); // كل تعارض يظهر للطرفين
   const warns = issues.filter((i) => i.level === 'warning').length;
   const s = settings();
   const daysSinceBackup = s.lastBackupAt ? Math.floor((Date.now() - s.lastBackupAt) / 864e5) : null;
   const mine = myDeptId();
-  const depts = sortByName(store.data.departments).filter((d) => !mine || d.id === mine);
+  const depts = deptsOfCollege(cur).filter((d) => !mine || d.id === mine);
+  const sem = Number(s.semester || 1);
+  const errorsOf = (list) => list.filter((x) => (conflicts.get(x.id) || []).some((i) => i.level === 'error')).length;
 
-  const recent = [...store.data.sessions].filter((x) => x.updatedAt).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8);
-  const stat = (icon, n, label, href) => `<a class="stat" href="${href}"><span class="stat-icon">${icon}</span><span class="stat-n">${n}</span><span class="stat-l">${label}</span></a>`;
+  const recent = sessions.filter((x) => x.updatedAt).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8);
+  const stat = (icon, n, label, href, note = '') => `<a class="stat" href="${href}"><span class="stat-icon">${icon}</span><span class="stat-n">${n}</span><span class="stat-l">${label}${note ? ` <small>${note}</small>` : ''}</span></a>`;
+  const colleges = managedColleges();
   container.innerHTML = '';
   const page = el(`<div class="page">
-    <div class="page-head"><h2>لوحة التحكم</h2><span class="term-badge">${esc(termLabel())}</span></div>
+    <div class="page-head"><h2>لوحة التحكم</h2>${cur ? `<span class="term-badge">🏛 ${esc(collegeName(cur))}</span>` : ''}<span class="term-badge">${esc(termLabel())}</span></div>
     ${isAdmin() && (daysSinceBackup === null || daysSinceBackup > 7) ? `<div class="banner warn">💾 ${daysSinceBackup === null ? 'لم تُؤخذ نسخة احتياطية بعد.' : `آخر نسخة احتياطية قبل ${daysSinceBackup} يوم.`} <a href="#/settings">خذ نسخة الآن</a></div>` : ''}
+    ${!cur && colleges.length > 1 ? `<div class="college-cards">${colleges.map((c) => {
+      const cs = allSessions.filter((x) => x.deptId && collegeOfDept(x.deptId) === c.id);
+      const ce = errorsOf(cs);
+      return `<button class="college-card" data-college="${esc(c.id)}">
+        <span class="cc-name">🏛 ${esc(c.name)}</span>
+        <span class="cc-stats"><span>${deptsOfCollege(c.id).filter((d) => !d.general).length || '—'} قسم</span>
+          <span>${store.data.groups.filter((g) => collegeOfDept(g.deptId) === c.id).length} شعبة</span>
+          <span>${cs.length} محاضرة</span></span>
+        <span class="chip ${ce ? 'chip-error' : 'chip-ok'}">${ce ? `⛔ ${ce} محاضرة متعارضة` : '✓ بلا تعارضات'}</span>
+      </button>`;
+    }).join('')}</div>` : ''}
     <div class="stats">
-      ${stat('🏢', store.data.departments.length, 'قسم', '#/departments')}
-      ${stat('🎓', store.data.groups.length, 'شعبة / مجموعة', '#/stages')}
-      ${stat('👨‍🏫', store.data.teachers.length, 'أستاذ', '#/teachers')}
-      ${stat('🚪', store.data.rooms.length, 'قاعة ومختبر', '#/rooms')}
-      ${stat('📘', store.data.subjects.length, 'مادة دراسية', '#/subjects')}
+      ${stat('🏢', depts.filter((d) => !d.general).length, 'قسم', '#/departments')}
+      ${stat('🎓', store.data.groups.filter((g) => inCollege(g.deptId)).length, 'شعبة / مجموعة', '#/stages')}
+      ${stat('👨‍🏫', store.data.teachers.length, 'أستاذ', '#/teachers', '(مشترك)')}
+      ${stat('🚪', store.data.rooms.length, 'قاعة ومختبر', '#/rooms', '(مشترك)')}
+      ${stat('📘', store.data.subjects.filter((x) => inCollege(x.deptId) && Number(x.semester || 1) === sem).length, 'مادة هذا الفصل', '#/subjects')}
       ${stat('🗓', sessions.length, 'محاضرة هذا الفصل', '#/schedule')}
       ${stat(errors ? '⛔' : '✅', errors, 'تعارض', '#/conflicts')}
       ${stat('⚠️', warns, 'تنبيه', '#/conflicts')}
@@ -47,31 +69,40 @@ export function renderDashboard(container) {
       <a class="btn" href="#/generate">⚙️ توليد تلقائي</a>
       <a class="btn" href="#/subjects">📘 المواد والمناهج</a>
       <a class="btn" href="#/teachers">👨‍🏫 الأساتذة</a>
+      ${isAdmin() ? '<a class="btn" href="#/colleges">🏛 الكليات</a>' : ''}
     </div>` : ''}
     <div class="two-col">
-      <div class="card"><h3>حالة الأقسام</h3>
+      <div class="card"><h3>حالة الأقسام${cur ? ` — ${esc(collegeShort(cur))}` : ''}</h3>
         <div class="table-wrap"><table class="mini-table"><thead><tr><th>القسم</th><th>الشعب</th><th>المواد (هذا الفصل)</th><th>المحاضرات</th><th>التعارضات</th><th></th></tr></thead><tbody>
-        ${depts.map((d) => {
+        ${depts.map((d, i) => {
           const ds = sessions.filter((x) => x.deptId === d.id);
-          const de = ds.filter((x) => (conflicts.get(x.id) || []).some((i) => i.level === 'error')).length;
-          const subs = store.data.subjects.filter((x) => x.deptId === d.id && Number(x.semester || 1) === Number(s.semester || 1)).length;
-          return `<tr><td>${esc(d.name)}</td><td>${store.data.groups.filter((g) => g.deptId === d.id).length}</td><td>${subs}</td><td>${ds.length}</td>
+          const de = errorsOf(ds);
+          const subs = store.data.subjects.filter((x) => x.deptId === d.id && Number(x.semester || 1) === sem).length;
+          const head = !cur && (i === 0 || depts[i - 1].collegeId !== d.collegeId) ? `<tr class="group-row"><th colspan="6">🏛 ${esc(collegeName(d.collegeId))}</th></tr>` : '';
+          return `${head}<tr><td>${esc(d.general ? 'الكلية كاملة' : d.name)}</td><td>${store.data.groups.filter((g) => g.deptId === d.id).length}</td><td>${subs}</td><td>${ds.length}</td>
             <td>${de ? `<span class="chip chip-error">${de}</span>` : '<span class="chip chip-ok">0</span>'}</td>
             <td><a class="btn btn-sm" href="#/schedule?type=dept&id=${d.id}">عرض</a></td></tr>`;
-        }).join('')}
+        }).join('') || '<tr><td colspan="6" class="muted">لا توجد أقسام</td></tr>'}
         </tbody></table></div></div>
       <div class="card"><h3>آخر التعديلات</h3>
-        ${recent.length ? `<ul class="recent">${recent.map((x) => `<li><b>${esc(subjectName(x))}</b> — ${DAY_NAMES[x.day]} ${formatRange(x.start, x.end)}<br><small class="muted">${esc(x.updatedBy || '')} • ${new Date(x.updatedAt).toLocaleString('ar-IQ')}</small></li>`).join('')}</ul>` : '<p class="muted">لا توجد تعديلات بعد</p>'}
+        ${recent.length ? `<ul class="recent">${recent.map((x) => `<li><b>${esc(subjectName(x))}</b> — ${DAY_NAMES[x.day]} ${formatRange(x.start, x.end)}${!cur && x.deptId ? ` <span class="chip">${esc(collegeShort(collegeOfDept(x.deptId)))}</span>` : ''}<br><small class="muted">${esc(x.updatedBy || '')} • ${new Date(x.updatedAt).toLocaleString('ar-IQ')}</small></li>`).join('')}</ul>` : '<p class="muted">لا توجد تعديلات بعد</p>'}
       </div>
     </div>
   </div>`);
   container.appendChild(page);
+  $$('[data-college]', page).forEach((b) => b.onclick = () => {
+    setCurrentCollege(b.dataset.college);
+    window.dispatchEvent(new Event('siraj:college'));
+    renderDashboard(container);
+  });
 }
 
 /* =============================== التعارضات =============================== */
-const cf = { dept: '', level: 'all' };
+const cf = { dept: null, level: 'all' };
 export function renderConflicts(container) {
-  if (!cf.dept) cf.dept = myDeptId() || '';
+  const cur = currentCollegeId();
+  if (cf.dept === null) cf.dept = myDeptId() || '';
+  if (cf.dept && cur && collegeOfDept(cf.dept) !== cur) cf.dept = '';
   const sessions = termSessions();
   const conflicts = checkAll(sessions, ctx());
   const rows = [];
@@ -79,6 +110,7 @@ export function renderConflicts(container) {
   for (const [id, list] of conflicts) {
     const s = byId('sessions', id);
     if (!s || (cf.dept && s.deptId !== cf.dept)) continue;
+    if (cur && !(s.deptId && collegeOfDept(s.deptId) === cur) && !(s.kind === 'external' && (conflicts.get(id) || []).some((i) => i.otherId && collegeOfDept(byId('sessions', i.otherId)?.deptId) === cur))) continue;
     for (const i of list) {
       if (cf.level !== 'all' && i.level !== cf.level) continue;
       const key = i.otherId ? [id, i.otherId].sort().join('|') + i.type : id + i.type + i.message;
@@ -90,14 +122,15 @@ export function renderConflicts(container) {
   rows.sort((a, b) => (a.i.level === b.i.level ? a.s.day - b.s.day || a.s.start - b.s.start : a.i.level === 'error' ? -1 : 1));
   container.innerHTML = '';
   const page = el(`<div class="page">
-    <div class="page-head"><h2>⚠️ التعارضات والتنبيهات</h2><span class="muted">${rows.length}</span></div>
+    <div class="page-head"><h2>⚠️ التعارضات والتنبيهات</h2>${cur ? `<span class="term-badge">🏛 ${esc(collegeName(cur))}</span>` : ''}<span class="muted">${rows.length}</span></div>
+    <p class="muted">التعارض مع قاعة أو أستاذ يُكشف على مستوى الجامعة كلها، حتى لو كانت المحاضرة الأخرى في كلية ثانية.</p>
     <div class="toolbar">
-      <select id="dept"><option value="">كل الأقسام</option>${sortByName(store.data.departments).map((d) => `<option value="${d.id}" ${d.id === cf.dept ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}</select>
+      <select id="dept">${deptOptionsHTML(cf.dept, { collegeId: cur, placeholder: cur ? 'كل أقسام الكلية' : 'كل الأقسام' })}</select>
       <div class="seg">${[['all', 'الكل'], ['error', 'تعارضات'], ['warning', 'تنبيهات']].map(([k, v]) => `<button data-l="${k}" class="${cf.level === k ? 'active' : ''}">${v}</button>`).join('')}</div>
     </div>
     ${rows.length ? `<div class="issues-list">${rows.map((r, n) => `<div class="issue-row ${r.i.level}">
         <span class="badge">${r.i.level === 'error' ? '⛔ تعارض' : '⚠️ تنبيه'}</span>
-        <div><b>${esc(subjectName(r.s))}</b> — ${esc(deptName(r.s.deptId))} — ${DAY_NAMES[r.s.day]} ${formatRange(r.s.start, r.s.end)}<br>${esc(r.i.message)}</div>
+        <div><b>${esc(subjectName(r.s))}</b> — ${esc(deptName(r.s.deptId))}${!cur && r.s.deptId ? ` (${esc(collegeShort(collegeOfDept(r.s.deptId)))})` : ''} — ${DAY_NAMES[r.s.day]} ${formatRange(r.s.start, r.s.end)}<br>${esc(r.i.message)}</div>
         <button class="btn btn-sm" data-open="${n}">فتح</button></div>`).join('')}</div>`
       : '<div class="empty-state">✅ لا توجد تعارضات. الجداول سليمة.</div>'}
   </div>`);
@@ -116,28 +149,44 @@ export function renderUsers(container) {
     return;
   }
   const users = [...store.data.users].sort((a, b) => (a.email || '').localeCompare(b.email || ''));
-  const depts = sortByName(store.data.departments);
+  const colleges = managedColleges();
   const page = el(`<div class="page">
     <div class="page-head"><h2>👥 المستخدمون والصلاحيات</h2></div>
-    <div class="card"><p><b>طريقة إضافة مستخدم:</b> يفتح الشخص النظام ويختار «إنشاء حساب»، ثم يظهر هنا بصلاحية «عرض فقط»، فتغيّر صلاحيته إلى «مسؤول قسم» وتحدد قسمه، أو «معاون العميد».</p>
-    <ul class="muted"><li><b>معاون العميد:</b> كل الصلاحيات على كل الأقسام والقاعات والمستخدمين والإعدادات.</li>
-    <li><b>مسؤول قسم:</b> يدير مواد وشعب وجداول قسمه فقط، ويرى جداول الجميع لتجنب التعارض.</li>
-    <li><b>عرض فقط:</b> يشاهد الجداول دون تعديل (يمكن أيضاً للطلبة المشاهدة عبر رابط المشاركة دون حساب).</li></ul></div>
-    <div class="table-wrap"><table class="data-table"><thead><tr><th>البريد</th><th>الاسم</th><th>الصلاحية</th><th>القسم</th><th></th></tr></thead><tbody>
+    <div class="card"><p><b>طريقة إضافة مستخدم:</b> يفتح الشخص النظام ويختار «إنشاء حساب»، ثم يظهر هنا بصلاحية «عرض فقط»، فتغيّر صلاحيته وتحدد كليته أو قسمه ثم تضغط «حفظ».</p>
+    <ul class="muted"><li><b>مدير النظام:</b> كل الصلاحيات على كل الكليات والقاعات والمستخدمين والإعدادات.</li>
+    <li><b>معاون عميد (كلية واحدة):</b> يدير أقسام كليته ومراحلها وموادها وجداولها وأساتذتها وقاعاتها.</li>
+    <li><b>مسؤول قسم:</b> يدير مواد وشعب وجداول قسمه فقط.</li>
+    <li><b>عرض فقط:</b> يشاهد الجداول دون تعديل (يمكن أيضاً للطلبة المشاهدة عبر رابط المشاركة دون حساب).</li>
+    <li>الجميع يرون جداول كل الكليات لتجنب التعارض في القاعات والأساتذة المشتركين.</li></ul></div>
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>البريد</th><th>الاسم</th><th>الصلاحية</th><th>الكلية / القسم</th><th></th></tr></thead><tbody>
     ${users.map((u) => `<tr data-id="${u.id}"><td data-label="البريد">${esc(u.email)}</td><td data-label="الاسم">${esc(u.name || '')}</td>
-      <td data-label="الصلاحية"><select data-role>${['viewer', 'dept', 'admin'].map((r) => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${ROLE_NAMES[r]}</option>`).join('')}</select></td>
-      <td data-label="القسم"><select data-dept><option value="">—</option>${depts.map((d) => `<option value="${d.id}" ${d.id === u.deptId ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}</select></td>
+      <td data-label="الصلاحية"><select data-role>${['viewer', 'dept', 'college', 'admin'].map((r) => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${ROLE_NAMES[r]}</option>`).join('')}</select></td>
+      <td data-label="الكلية / القسم">
+        <select data-college ${u.role === 'college' ? '' : 'hidden'}><option value="">— اختر الكلية —</option>${colleges.map((c) => `<option value="${c.id}" ${c.id === u.collegeId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
+        <select data-dept ${u.role === 'dept' ? '' : 'hidden'}>${deptOptionsHTML(u.deptId, { placeholder: '— اختر القسم —' })}</select>
+        ${['admin', 'viewer'].includes(u.role || 'viewer') ? '<span class="muted" data-none>—</span>' : ''}</td>
       <td class="actions"><button class="btn btn-sm btn-primary" data-save>حفظ</button><button class="btn btn-sm btn-danger-ghost" data-del>حذف</button></td></tr>`).join('')}
     </tbody></table></div></div>`);
   container.appendChild(page);
+  page.addEventListener('change', (e) => {
+    if (!e.target.matches('[data-role]')) return;
+    const tr = e.target.closest('tr');
+    const r = e.target.value;
+    $('[data-college]', tr).hidden = r !== 'college';
+    $('[data-dept]', tr).hidden = r !== 'dept';
+    $('[data-none]', tr)?.remove();
+  });
   page.addEventListener('click', async (e) => {
     const tr = e.target.closest('tr[data-id]');
     if (!tr) return;
     const id = tr.dataset.id;
     if (e.target.matches('[data-save]')) {
-      const r = $('[data-role]', tr).value, d = $('[data-dept]', tr).value || null;
+      const r = $('[data-role]', tr).value;
+      const d = r === 'dept' ? $('[data-dept]', tr).value || null : null;
+      const c = r === 'college' ? $('[data-college]', tr).value || null : r === 'dept' ? collegeOfDept(d) : null;
       if (r === 'dept' && !d) { toast('حدد القسم لمسؤول القسم', 'warn'); return; }
-      await batchWrite([{ op: 'update', col: 'users', id, data: { role: r, deptId: d } }]);
+      if (r === 'college' && !c) { toast('حدد الكلية لمعاون العميد', 'warn'); return; }
+      await batchWrite([{ op: 'update', col: 'users', id, data: { role: r, deptId: d, collegeId: c } }]);
       toast('تم تحديث الصلاحية', 'success');
     }
     if (e.target.matches('[data-del]')) {

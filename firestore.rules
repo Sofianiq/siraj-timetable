@@ -4,11 +4,12 @@ rules_version = '2';
 // قواعد أمان قاعدة البيانات (Firestore) — نظام إدارة الجداول الدراسية
 //
 //  • القراءة للجميع (حتى يستطيع الطلبة رؤية الجداول عبر رابط المشاركة بدون حساب).
-//  • معاون العميد (admin): تعديل كل شيء.
+//  • مدير النظام (admin): تعديل كل شيء في كل الكليات.
+//  • معاون العميد (college): تعديل أقسام كليته ومراحلها وشعبها وموادها وجداولها وأساتذتها وقاعاتها.
 //  • مسؤول القسم (dept): تعديل المراحل والشعب والمواد والمحاضرات والأساتذة التابعة لقسمه فقط.
 //  • العرض فقط (viewer): لا يعدّل شيئاً.
 //
-//  ⚠️ مهم: استبدل admin@example.com أدناه ببريد معاون العميد نفسه المكتوب في js/config.js
+//  ⚠️ مهم: استبدل admin@example.com أدناه ببريد مدير النظام نفسه المكتوب في js/config.js
 // =====================================================================
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -21,10 +22,22 @@ service cloud.firestore {
     function hasProfile() { return signedIn() && exists(profilePath()); }
     function profile() { return get(profilePath()).data; }
     function isAdmin() { return isSuperAdmin() || (hasProfile() && profile().role == 'admin'); }
+
+    // مسؤول القسم: المستند تابع لقسمه
     function isDeptHead() { return hasProfile() && profile().role == 'dept' && profile().deptId != null; }
     function ownDept(data) { return isDeptHead() && data.deptId == profile().deptId; }
 
-    // الحقول الأساسية لملف المستخدم لا يغيّرها إلا المشرف
+    // معاون العميد: المستند تابع لقسم ضمن كليته، أو (للأقسام والقاعات) تابع لكليته مباشرة
+    function isCollegeAdmin() { return hasProfile() && profile().role == 'college' && profile().collegeId != null; }
+    function deptInMyCollege(data) {
+      return isCollegeAdmin() && data.deptId != null
+        && get(/databases/$(database)/documents/departments/$(data.deptId)).data.collegeId == profile().collegeId;
+    }
+    function inMyCollege(data) { return isCollegeAdmin() && data.collegeId == profile().collegeId; }
+
+    function deptScoped(data) { return ownDept(data) || deptInMyCollege(data); }
+
+    // ملف المستخدم: لا يغيّر الصلاحية إلا مدير النظام
     match /users/{uid} {
       allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
       allow create: if signedIn() && request.auth.uid == uid
@@ -33,17 +46,24 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
-    // بيانات مشتركة يعدّلها المشرف فقط
+    // القراءة للجميع، والكتابة لمدير النظام
     match /{col}/{id} {
       allow read: if col in ['colleges', 'departments', 'stages', 'groups', 'teachers', 'rooms', 'subjects', 'sessions', 'settings'];
       allow write: if isAdmin() && col in ['colleges', 'departments', 'stages', 'groups', 'teachers', 'rooms', 'subjects', 'sessions', 'settings'];
     }
 
-    // صلاحيات مسؤول القسم على بيانات قسمه
+    // بيانات مرتبطة بقسم: لمسؤول القسم ولمعاون عميد الكلية
     match /{col}/{id} {
-      allow create: if col in ['stages', 'groups', 'subjects', 'sessions', 'teachers'] && ownDept(request.resource.data);
-      allow update: if col in ['stages', 'groups', 'subjects', 'sessions', 'teachers'] && ownDept(resource.data) && ownDept(request.resource.data);
-      allow delete: if col in ['stages', 'groups', 'subjects', 'sessions', 'teachers'] && ownDept(resource.data);
+      allow create: if col in ['stages', 'groups', 'subjects', 'sessions', 'teachers'] && deptScoped(request.resource.data);
+      allow update: if col in ['stages', 'groups', 'subjects', 'sessions', 'teachers'] && deptScoped(resource.data) && deptScoped(request.resource.data);
+      allow delete: if col in ['stages', 'groups', 'subjects', 'sessions', 'teachers'] && deptScoped(resource.data);
+    }
+
+    // الأقسام والقاعات: لمعاون عميد الكلية المالكة
+    match /{col}/{id} {
+      allow create: if col in ['departments', 'rooms'] && inMyCollege(request.resource.data);
+      allow update: if col in ['departments', 'rooms'] && inMyCollege(resource.data) && inMyCollege(request.resource.data);
+      allow delete: if col in ['departments', 'rooms'] && inMyCollege(resource.data);
     }
   }
 }

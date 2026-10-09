@@ -2,17 +2,35 @@
  * صفحات إدارة البيانات الأساسية (إضافة / تعديل / حذف):
  * الكليات، الأقسام، المراحل والشعب، الأساتذة وأوقات توفرهم، القاعات والمختبرات، المواد الدراسية (مع الاستيراد من Excel).
  */
-import { store, byId, batchWrite, uid, isAdmin, canEditDept, myDeptId, settings } from '../store.js';
+import {
+  store, byId, batchWrite, uid, isAdmin, canEditDept, canEditCollege, myDeptId, myCollegeId, settings,
+  canEdit as canEditAny, collegeOfDept,
+} from '../store.js';
 import { esc, el, $, $$, modal, toast, confirmDialog, buildForm, readForm, loadScript, download } from '../ui.js';
 import { ROOM_TYPES, SHIFTS, STAGE_NAMES, SEMESTERS, DAY_NAMES, formatTime } from '../timeutil.js';
-import { sortByName, deptName, groupLabel, teacherName } from '../model.js';
+import {
+  sortByName, deptName, groupLabel, teacherName, collegeName, collegeShort, managedColleges, allCollegesSorted,
+  currentCollegeId, deptsOfCollege, deptOptionsHTML,
+} from '../model.js';
+import { collegeStructureOps } from '../seed/radiology.js';
 
 const EXCELJS = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
 
 const opt = (arr, label = (x) => x.name) => arr.map((x) => ({ value: x.id, label: label(x) }));
-const deptOptions = () => opt(sortByName(store.data.departments));
-const collegeOptions = () => opt(sortByName(store.data.colleges));
-const teacherOptions = () => opt(sortByName(store.data.teachers));
+/** خيارات الأقسام مجمّعة حسب الكلية (الكلية المختارة أولاً) */
+const deptOptions = (filter = () => true) => {
+  const cur = currentCollegeId();
+  const list = deptsOfCollege('').filter(filter).sort((a, b) => (a.collegeId === cur ? 0 : 1) - (b.collegeId === cur ? 0 : 1));
+  return list.map((d) => ({ value: d.id, label: d.general ? `${d.name} (الكلية كاملة)` : d.name, group: collegeName(d.collegeId) }));
+};
+const collegeOptions = (filter = () => true) => opt(allCollegesSorted().filter(filter));
+/** الأساتذة مشتركون بين الكليات: مجمّعون حسب كلية القسم الأساسي */
+const teacherOptions = () => sortByName(store.data.teachers)
+  .map((t) => ({ value: t.id, label: t.name, group: collegeName(collegeOfDept(t.deptId)) || 'بدون قسم' }))
+  .sort((a, b) => a.group.localeCompare(b.group, 'ar'));
+/** القسم الافتراضي عند الإضافة: قسم المستخدم أو أول قسم يحق له تعديله في الكلية المختارة */
+const defaultDept = () => myDeptId() || deptsOfCollege(currentCollegeId()).find((d) => canEditDept(d.id))?.id || '';
+const defaultCollege = () => myCollegeId() || currentCollegeId() || managedColleges()[0]?.id || '';
 const stageLevelOptions = () => [1, 2, 3, 4, 5, 6].map((l) => ({ value: l, label: `المرحلة ${STAGE_NAMES[l]}` }));
 
 /* =============================== تعريف الكيانات =============================== */
@@ -21,63 +39,87 @@ const ENTITIES = {
     title: 'الكليات', single: 'كلية', icon: '🏛',
     canEdit: () => isAdmin(),
     fields: () => [
-      { key: 'name', label: 'اسم الكلية', required: true, full: true },
-      { key: 'own', label: 'كليتنا', type: 'checkbox', checkLabel: 'هذه هي كلية التقنيات الصحية والطبية (المُدارة في النظام)' },
+      { key: 'name', label: 'اسم الكلية', required: true, full: true, placeholder: 'مثال: كلية التمريض' },
+      { key: 'short', label: 'الاسم المختصر', placeholder: 'مثال: التمريض' },
+      { key: 'order', label: 'ترتيب الظهور', type: 'number', min: 1, default: managedColleges().length + 1 },
+      { key: 'own', label: 'النوع', type: 'checkbox', checkLabel: 'كلية مُدارة في النظام (لها أقسام وجداول). ألغِ التحديد لجهة خارجية تُستخدم للحجوزات فقط', default: true, full: true },
+      { key: 'autoStructure', label: 'الهيكل', type: 'checkbox', createOnly: true, default: true, full: true,
+        checkLabel: 'إنشاء «قسم عام» يمثل الكلية كاملة مع مراحله وشعبة صباحية لكل مرحلة (مناسب للكليات التي لا تقسم طلبتها إلى أقسام)' },
+      { key: 'stagesCount', label: 'عدد المراحل الدراسية', type: 'number', min: 1, max: 6, default: 4, createOnly: true },
     ],
-    columns: [['name', 'الاسم'], [(r) => (r.own ? 'نعم' : '—'), 'كليتنا']],
-    help: 'أضف الكليات الأخرى في الجامعة لتسجيل قاعاتها المشتركة وحجوزاتها، فيمنع النظام التعارض على مستوى الجامعة.',
+    columns: [['name', 'الاسم'], ['short', 'مختصر'], [(r) => (r.own !== false ? 'مُدارة' : 'جهة خارجية'), 'النوع'],
+      [(r) => store.data.departments.filter((d) => d.collegeId === r.id).length, 'الأقسام'],
+      [(r) => store.data.groups.filter((g) => collegeOfDept(g.deptId) === r.id).length, 'الشعب'],
+      [(r) => store.data.rooms.filter((x) => x.collegeId === r.id).length, 'القاعات المملوكة']],
+    sort: (a, b) => (a.order ?? 50) - (b.order ?? 50) || String(a.name).localeCompare(String(b.name), 'ar'),
+    help: 'يدعم النظام عدة كليات. القاعات والمختبرات والأساتذة مشتركون بين كل الكليات، ويمنع النظام التعارض على مستوى الجامعة. أضف «جهة خارجية» لتسجيل حجوزات جهات غير مُدارة في النظام.',
+    beforeSave: (v) => ({ ...v, order: Number(v.order) || 50 }),
+    customCreate: (data) => {
+      const { autoStructure, stagesCount, ...college } = data;
+      if (autoStructure && college.own !== false) {
+        return collegeStructureOps(uid, { ...college, stages: Math.min(6, Math.max(1, Number(stagesCount) || 4)) }).ops;
+      }
+      return [{ op: 'set', col: 'colleges', id: uid(), data: college }];
+    },
   },
   departments: {
-    title: 'الأقسام', single: 'قسم', icon: '🏢',
-    canEdit: () => isAdmin(),
+    title: 'الأقسام', single: 'قسم', icon: '🏢', collegeScoped: (r) => r.collegeId,
+    canEdit: (r) => isAdmin() || canEditCollege(r ? r.collegeId : myCollegeId()),
     fields: () => [
       { key: 'name', label: 'اسم القسم', required: true, full: true },
       { key: 'short', label: 'الاسم المختصر', placeholder: 'مثال: الأشعة' },
-      { key: 'collegeId', label: 'الكلية', type: 'select', options: collegeOptions(), required: true },
+      { key: 'collegeId', label: 'الكلية', type: 'select', options: collegeOptions((c) => c.own !== false && canEditCollege(c.id)), required: true, default: defaultCollege() },
+      { key: 'general', label: 'قسم عام', type: 'checkbox', checkLabel: 'يمثل الكلية كاملة (لا يظهر اسمه كقسم في الطباعة)' },
     ],
-    columns: [['name', 'القسم'], ['short', 'مختصر'], [(r) => byId('colleges', r.collegeId)?.name || '', 'الكلية'],
-      [(r) => store.data.groups.filter((g) => g.deptId === r.id).length, 'عدد الشعب']],
+    columns: [['name', 'القسم'], ['short', 'مختصر'], [(r) => collegeName(r.collegeId), 'الكلية'],
+      [(r) => store.data.stages.filter((g) => g.deptId === r.id).length, 'المراحل'],
+      [(r) => store.data.groups.filter((g) => g.deptId === r.id).length, 'الشعب'],
+      [(r) => store.data.subjects.filter((g) => g.deptId === r.id).length, 'المواد']],
+    sort: (a, b) => deptsOfCollege('').indexOf(a) - deptsOfCollege('').indexOf(b),
   },
   teachers: {
-    title: 'الأساتذة', single: 'أستاذ', icon: '👨‍🏫', deptScoped: true,
-    canEdit: (r) => isAdmin() || canEditDept(r ? r.deptId : myDeptId()),
+    title: 'الأساتذة', single: 'أستاذ', icon: '👨‍🏫', deptScoped: true, collegeScoped: (r) => collegeOfDept(r.deptId),
+    help: 'الأساتذة مشتركون بين الكليات: يمكن إسناد أي أستاذ لمحاضرة في أي قسم أو كلية، ويمنع النظام تعارض أوقاته في كل الكليات. القسم الأساسي للتنظيم فقط.',
+    canEdit: (r) => (r ? canEditDept(r.deptId) : canEditAny()),
     fields: () => [
       { key: 'name', label: 'الاسم', required: true, full: true, placeholder: 'مثال: د. أحمد علي' },
       { key: 'title', label: 'اللقب العلمي', type: 'select', options: ['أستاذ', 'أستاذ مساعد', 'مدرس', 'مدرس مساعد', 'محاضر'].map((x) => ({ value: x, label: x })) },
-      { key: 'deptId', label: 'القسم الأساسي', type: 'select', options: deptOptions(), required: true, default: myDeptId() || '' },
+      { key: 'deptId', label: 'القسم الأساسي', type: 'select', options: deptOptions((d) => canEditDept(d.id)), required: true, default: defaultDept() },
       { key: 'phone', label: 'الهاتف' },
       { key: 'email', label: 'البريد الإلكتروني', type: 'email' },
       { key: 'maxDailyHours', label: 'أقصى ساعات يومياً', type: 'number', min: 1, max: 12 },
     ],
     columns: [['name', 'الاسم'], ['title', 'اللقب'], [(r) => deptName(r.deptId), 'القسم'],
+      [(r) => collegeShort(collegeOfDept(r.deptId)), 'الكلية'],
       [(r) => availabilitySummary(r.availability), 'أوقات التوفر'],
       [(r) => store.data.sessions.filter((s) => s.teacherId === r.id).reduce((n, s) => n + (s.end - s.start) / 60, 0), 'ساعات مجدولة']],
     rowActions: [{ label: '🕒 أوقات التوفر', run: (r) => editAvailability(r) }],
     onDelete: (r) => store.data.sessions.filter((s) => s.teacherId === r.id).map((s) => ({ op: 'update', col: 'sessions', id: s.id, data: { teacherId: null } })),
   },
   rooms: {
-    title: 'القاعات والمختبرات', single: 'قاعة/مختبر', icon: '🚪',
-    canEdit: () => isAdmin(),
+    title: 'القاعات والمختبرات', single: 'قاعة/مختبر', icon: '🚪', collegeScoped: (r) => r.collegeId, sharedWhenEmpty: true,
+    help: 'القاعات والمختبرات مشتركة بين كل الكليات، ولا يمكن حجز قاعة لمحاضرتين في الوقت نفسه في أي كلية. «الكلية المالكة» للتنظيم وأولوية التوليد التلقائي فقط.',
+    canEdit: (r) => isAdmin() || canEditCollege(r ? r.collegeId : myCollegeId()),
     fields: () => [
       { key: 'name', label: 'الاسم', required: true, placeholder: 'مثال: القاعة 5 أو مختبر الأشعة 2' },
       { key: 'type', label: 'النوع', type: 'select', options: Object.entries(ROOM_TYPES).map(([value, label]) => ({ value, label })), required: true, default: 'hall' },
       { key: 'labKind', label: 'نوع المختبر (للمختبرات)', placeholder: 'مثال: مختبر أشعة', help: 'يطابق حقل «نوع المختبر» في المادة ليختار المولّد المختبر المناسب' },
       { key: 'capacity', label: 'السعة (عدد الطلبة)', type: 'number', min: 1, required: true },
-      { key: 'collegeId', label: 'الكلية المالكة', type: 'select', options: collegeOptions() },
+      { key: 'collegeId', label: 'الكلية المالكة', type: 'select', options: collegeOptions((c) => canEditCollege(c.id)), default: defaultCollege(), placeholder: isAdmin() ? '— مشتركة / بدون —' : false },
       { key: 'deptId', label: 'قسم له الأولوية (اختياري)', type: 'select', options: deptOptions() },
       { key: 'building', label: 'المبنى / الطابق' },
       { key: 'active', label: 'الحالة', type: 'checkbox', checkLabel: 'متاحة للجدولة', default: true },
     ],
     columns: [['name', 'الاسم'], [(r) => ROOM_TYPES[r.type] || '', 'النوع'], ['labKind', 'نوع المختبر'], ['capacity', 'السعة'],
-      [(r) => byId('colleges', r.collegeId)?.name || '', 'الكلية'], ['building', 'المبنى'], [(r) => (r.active === false ? 'معطلة' : 'متاحة'), 'الحالة']],
+      [(r) => collegeShort(r.collegeId) || 'مشتركة', 'الكلية'], ['building', 'المبنى'], [(r) => (r.active === false ? 'معطلة' : 'متاحة'), 'الحالة']],
     onDelete: (r) => store.data.sessions.filter((s) => s.roomId === r.id).map((s) => ({ op: 'update', col: 'sessions', id: s.id, data: { roomId: null } })),
   },
   subjects: {
-    title: 'المواد الدراسية', single: 'مادة', icon: '📘', deptScoped: true,
-    canEdit: (r) => isAdmin() || canEditDept(r ? r.deptId : myDeptId()),
+    title: 'المواد الدراسية', single: 'مادة', icon: '📘', deptScoped: true, collegeScoped: (r) => collegeOfDept(r.deptId),
+    canEdit: (r) => (r ? canEditDept(r.deptId) : canEditAny()),
     fields: () => [
       { key: 'name', label: 'اسم المادة', required: true, full: true },
-      { key: 'deptId', label: 'القسم', type: 'select', options: deptOptions(), required: true, default: myDeptId() || '' },
+      { key: 'deptId', label: 'القسم', type: 'select', options: deptOptions((d) => canEditDept(d.id)), required: true, default: defaultDept() },
       { key: 'stageLevel', label: 'المرحلة', type: 'select', options: stageLevelOptions(), required: true },
       { key: 'semester', label: 'الفصل', type: 'select', options: Object.entries(SEMESTERS).map(([value, label]) => ({ value, label })), required: true, default: settings().semester || 1 },
       { key: 'code', label: 'رمز المادة' },
@@ -88,7 +130,7 @@ const ENTITIES = {
       { key: 'practicalTeacherId', label: 'أستاذ العملي', type: 'select', options: teacherOptions() },
       { key: 'combineTheory', label: 'النظري', type: 'checkbox', checkLabel: 'يُدرَّس النظري لكل شعب المرحلة معاً (في نوع الدراسة نفسه)', default: true, full: true },
     ],
-    columns: [['name', 'المادة'], [(r) => deptName(r.deptId), 'القسم'], [(r) => STAGE_NAMES[r.stageLevel] || r.stageLevel, 'المرحلة'],
+    columns: [['name', 'المادة'], [(r) => deptName(r.deptId), 'القسم'], [(r) => collegeShort(collegeOfDept(r.deptId)), 'الكلية'], [(r) => STAGE_NAMES[r.stageLevel] || r.stageLevel, 'المرحلة'],
       [(r) => r.semester || 1, 'الفصل'], ['theoryHours', 'نظري'], ['practicalHours', 'عملي'], ['labType', 'المختبر'],
       [(r) => [teacherName(r.theoryTeacherId), teacherName(r.practicalTeacherId)].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(' / '), 'الأستاذ'],
       [(r) => (r.needsReview ? '<span class="chip chip-warn" title="الساعات قيم افتراضية، يرجى مراجعتها">مراجعة</span>' : ''), '', true]],
@@ -113,20 +155,25 @@ const filters = {};
 export function renderEntity(container, col) {
   const E = ENTITIES[col];
   const f = filters[col] || (filters[col] = { q: '', dept: E.deptScoped ? (myDeptId() || '') : '' });
+  const cur = currentCollegeId();
+  if (f.dept && cur && collegeOfDept(f.dept) !== cur) f.dept = '';
   let rows = [...store.data[col]];
+  // تصفية حسب الكلية المختارة في الشريط العلوي (العناصر المشتركة بلا كلية تظهر دائماً)
+  if (cur && E.collegeScoped) rows = rows.filter((r) => { const c = E.collegeScoped(r); return c === cur || (E.sharedWhenEmpty && !c); });
   if (f.dept) rows = rows.filter((r) => r.deptId === f.dept);
   if (f.q) rows = rows.filter((r) => JSON.stringify(r).includes(f.q));
+  const deptOrder = new Map(deptsOfCollege('').map((d, i) => [d.id, i]));
   rows = col === 'subjects'
-    ? rows.sort((a, b) => deptName(a.deptId).localeCompare(deptName(b.deptId), 'ar') || a.stageLevel - b.stageLevel || (a.semester || 1) - (b.semester || 1) || a.name.localeCompare(b.name, 'ar'))
-    : sortByName(rows);
+    ? rows.sort((a, b) => (deptOrder.get(a.deptId) ?? 999) - (deptOrder.get(b.deptId) ?? 999) || a.stageLevel - b.stageLevel || (a.semester || 1) - (b.semester || 1) || a.name.localeCompare(b.name, 'ar'))
+    : E.sort ? rows.sort(E.sort) : sortByName(rows);
 
   container.innerHTML = '';
   const page = el(`<div class="page">
-    <div class="page-head"><h2>${E.icon} ${E.title}</h2><span class="muted">${rows.length} عنصر</span></div>
+    <div class="page-head"><h2>${E.icon} ${E.title}</h2>${cur && E.collegeScoped ? `<span class="term-badge">${esc(collegeName(cur))}</span>` : ''}<span class="muted">${rows.length} عنصر</span></div>
     ${E.help ? `<p class="muted">${esc(E.help)}</p>` : ''}
     <div class="toolbar">
       <input type="search" id="q" placeholder="بحث…" value="${esc(f.q)}">
-      ${E.deptScoped ? `<select id="dept"><option value="">كل الأقسام</option>${sortByName(store.data.departments).map((d) => `<option value="${d.id}" ${d.id === f.dept ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}</select>` : ''}
+      ${E.deptScoped ? `<select id="dept">${deptOptionsHTML(f.dept, { collegeId: cur, placeholder: cur ? 'كل أقسام الكلية' : 'كل الأقسام' })}</select>` : ''}
       <span class="spacer"></span>
       ${(E.toolbar || []).filter(() => E.canEdit()).map((t, i) => `<button class="btn" data-tb="${i}">${esc(t.label)}</button>`).join('')}
       ${E.canEdit() ? `<button class="btn btn-primary" id="add">＋ إضافة ${E.single}</button>` : ''}
@@ -163,7 +210,7 @@ export function renderEntity(container, col) {
 
 export async function editEntity(col, row, preset = {}) {
   const E = ENTITIES[col];
-  const fields = E.fields();
+  const fields = E.fields().filter((x) => !(row && x.createOnly));
   const form = buildForm(fields, { ...preset, ...(row || {}) });
   await modal({
     title: row ? `تعديل ${E.single}` : `إضافة ${E.single}`, body: form, size: 'lg',
@@ -172,8 +219,9 @@ export async function editEntity(col, row, preset = {}) {
       if (v !== 'save') return true;
       let data = readForm(form, fields);
       if (E.beforeSave) data = E.beforeSave(data);
-      if (!E.canEdit(data)) throw new Error('لا تملك صلاحية الحفظ في هذا القسم');
-      await batchWrite([{ op: row ? 'update' : 'set', col, id: row?.id || uid(), data }]);
+      if (!E.canEdit(data)) throw new Error('لا تملك صلاحية الحفظ في هذا القسم أو الكلية');
+      if (!row && E.customCreate) await batchWrite(E.customCreate(data));
+      else await batchWrite([{ op: row ? 'update' : 'set', col, id: row?.id || uid(), data }]);
       toast('تم الحفظ', 'success');
       return true;
     },
@@ -186,8 +234,28 @@ async function deleteEntity(col, row) {
     toast('لا يمكن حذف قسم يحتوي على مراحل أو مواد. احذفها أولاً.', 'error', 5000);
     return;
   }
-  if (col === 'colleges' && store.data.departments.some((d) => d.collegeId === row.id)) {
-    toast('لا يمكن حذف كلية تحتوي على أقسام.', 'error');
+  if (col === 'colleges') {
+    const depts = store.data.departments.filter((d) => d.collegeId === row.id);
+    const deptIds = new Set(depts.map((d) => d.id));
+    const used = store.data.subjects.some((x) => deptIds.has(x.deptId)) || store.data.sessions.some((x) => deptIds.has(x.deptId));
+    if (depts.some((d) => !d.general) || used) {
+      toast('لا يمكن حذف كلية تحتوي على أقسام أو مواد أو محاضرات. احذفها أولاً.', 'error', 6000);
+      return;
+    }
+    // كلية بلا مواد ولا محاضرات: يُحذف قسمها العام ومراحله وشعبه معها
+    if (!(await confirmDialog(`حذف «${row.name}» مع مراحلها وشعبها الفارغة؟`, { danger: true, okLabel: 'حذف' }))) return;
+    await batchWrite([
+      ...store.data.groups.filter((g) => deptIds.has(g.deptId)).map((g) => ({ op: 'delete', col: 'groups', id: g.id })),
+      ...store.data.stages.filter((g) => deptIds.has(g.deptId)).map((g) => ({ op: 'delete', col: 'stages', id: g.id })),
+      ...depts.map((d) => ({ op: 'delete', col: 'departments', id: d.id })),
+      ...store.data.rooms.filter((r) => r.collegeId === row.id).map((r) => ({ op: 'update', col: 'rooms', id: r.id, data: { collegeId: null } })),
+      { op: 'delete', col: 'colleges', id: row.id },
+    ]);
+    toast('تم الحذف', 'success');
+    return;
+  }
+  if (col === 'teachers' && !isAdmin() && store.data.sessions.some((s) => s.teacherId === row.id && !canEditDept(s.deptId))) {
+    toast('هذا الأستاذ مسند لمحاضرات في أقسام أو كليات أخرى. اطلب من مدير النظام حذفه.', 'error', 6000);
     return;
   }
   if (!(await confirmDialog(`حذف «${row.name}»؟ ${E.deleteWarning || ''}`, { danger: true, okLabel: 'حذف' }))) return;
@@ -255,8 +323,10 @@ async function editAvailability(t) {
 
 /* =============================== المراحل والشعب =============================== */
 export function renderStages(container) {
-  const deptF = filters.stages || (filters.stages = { dept: myDeptId() || store.data.departments[0]?.id || '' });
-  const depts = sortByName(store.data.departments);
+  const cur = currentCollegeId();
+  const deptF = filters.stages || (filters.stages = { dept: '' });
+  const collegeDepts = deptsOfCollege(cur);
+  if (!collegeDepts.some((d) => d.id === deptF.dept)) deptF.dept = defaultDept() && collegeDepts.some((d) => d.id === defaultDept()) ? defaultDept() : collegeDepts[0]?.id || '';
   const deptId = deptF.dept;
   const canE = canEditDept(deptId);
   const stages = store.data.stages.filter((s) => s.deptId === deptId).sort((a, b) => a.level - b.level);
@@ -265,7 +335,7 @@ export function renderStages(container) {
     <div class="page-head"><h2>🎓 المراحل الدراسية والشعب</h2></div>
     <p class="muted">يمكن تقسيم كل مرحلة إلى أكثر من شعبة/مجموعة، ولكل شعبة نوع دراسة (صباحي أو مسائي) وعدد طلبة. مثال: «أ - صباحي»، «ب - صباحي»، «مسائي».</p>
     <div class="toolbar">
-      <select id="dept">${depts.map((d) => `<option value="${d.id}" ${d.id === deptId ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}</select>
+      <select id="dept">${deptOptionsHTML(deptId, { collegeId: cur })}</select>
       <span class="spacer"></span>
       ${canE ? '<button class="btn btn-primary" id="addStage">＋ إضافة مرحلة</button>' : ''}
     </div>
@@ -366,11 +436,11 @@ function cellText(c) {
 
 export async function importSubjects() {
   await loadScript(EXCELJS);
-  const depts = sortByName(store.data.departments).filter((d) => isAdmin() || d.id === myDeptId());
+  const startDept = defaultDept();
   const body = el(`<div>
     <p>اختر ملف Excel يحتوي على المناهج. يتعرف النظام تلقائياً على الأعمدة: <b>المادة، المرحلة، الفصل، نظري، عملي</b> (إلزامية) و<b>القسم، الرمز، نوع المختبر، أستاذ النظري، أستاذ العملي</b> (اختيارية). يمكن أن يحتوي الملف على عدة أوراق.</p>
     <div class="form-grid">
-      <div class="field"><label>القسم الافتراضي (عند عدم وجود عمود القسم)</label><select id="defDept">${depts.map((d) => `<option value="${d.id}">${esc(d.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>القسم الافتراضي (عند عدم وجود عمود القسم)</label><select id="defDept">${deptOptionsHTML(startDept, { filter: (d) => canEditDept(d.id) })}</select></div>
       <div class="field"><label>ملف Excel</label><input type="file" id="file" accept=".xlsx"></div>
     </div>
     <div id="preview"></div>
@@ -434,7 +504,10 @@ async function readCurriculum(buffer, defaultDept) {
       let deptId = lastDept || defaultDept;
       if (get('dept')) {
         const dn = norm(get('dept'));
-        const d = store.data.departments.find((x) => norm(x.name) === dn || (x.short && dn.includes(norm(x.short))) || norm(x.name).includes(dn));
+        // الأفضلية لأقسام كلية القسم الافتراضي، ثم بقية الكليات
+        const homeCollege = collegeOfDept(defaultDept);
+        const pool = [...store.data.departments].sort((a, b) => (a.collegeId === homeCollege ? 0 : 1) - (b.collegeId === homeCollege ? 0 : 1));
+        const d = pool.find((x) => norm(x.name) === dn || (x.short && dn.includes(norm(x.short))) || norm(x.name).includes(dn));
         if (d) deptId = d.id;
       }
       lastStage = stage; lastSem = sem; lastDept = deptId === defaultDept ? lastDept : deptId;

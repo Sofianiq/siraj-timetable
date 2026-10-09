@@ -23,7 +23,7 @@ export const store = {
   ready: false,
   data: Object.fromEntries(COLLECTIONS.map((c) => [c, []])),
   user: null,             // {uid, email, name}
-  profile: null,          // {role:'admin'|'dept'|'viewer', deptId}
+  profile: null,          // {role:'admin'|'college'|'dept'|'viewer', collegeId, deptId}
   _fb: null,
 };
 
@@ -45,14 +45,31 @@ export function role() {
   return store.profile?.role || 'viewer';
 }
 export const isAdmin = () => role() === 'admin';
-export const canEdit = () => ['admin', 'dept'].includes(role());
+export const canEdit = () => ['admin', 'college', 'dept'].includes(role());
+export const isSuperAdmin = () => store.mode === 'local' ||
+  SUPER_ADMIN_EMAILS.map((e) => e.toLowerCase()).includes((store.user?.email || '').toLowerCase());
+export const collegeOfDept = (deptId) => byId('departments', deptId)?.collegeId || null;
 /** هل يحق للمستخدم تعديل عنصر تابع لقسم معيّن؟ */
 export function canEditDept(deptId) {
   const r = role();
   if (r === 'admin') return true;
-  return r === 'dept' && !!deptId && deptId === store.profile?.deptId;
+  if (!deptId) return false;
+  if (r === 'college') return collegeOfDept(deptId) === store.profile?.collegeId;
+  return r === 'dept' && deptId === store.profile?.deptId;
+}
+/** هل يحق للمستخدم إدارة بيانات كلية كاملة (أقسامها وقاعاتها)؟ */
+export function canEditCollege(collegeId) {
+  const r = role();
+  return r === 'admin' || (r === 'college' && !!collegeId && collegeId === store.profile?.collegeId);
 }
 export const myDeptId = () => (role() === 'dept' ? store.profile?.deptId : null);
+/** كلية المستخدم (لمعاون العميد أو مسؤول القسم) — تُستخدم كاختيار افتراضي في الواجهة */
+export function myCollegeId() {
+  const r = role();
+  if (r === 'college') return store.profile?.collegeId || null;
+  if (r === 'dept') return collegeOfDept(store.profile?.deptId);
+  return null;
+}
 
 /* ------------------------------ التهيئة ------------------------------ */
 export async function initStore() {
@@ -232,9 +249,12 @@ export async function batchWrite(ops) {
     return;
   }
   const { fs, db } = store._fb;
-  for (let i = 0; i < ops.length; i += 450) {
+  // قواعد الأمان لغير المشرف العام تقرأ ملف المستخدم والقسم عند كل كتابة، ولـ Firestore حد أقصى
+  // لعدد هذه القراءات في الدفعة الواحدة؛ لذلك نقسّم كتاباتهم إلى دفعات صغيرة.
+  const size = isSuperAdmin() ? 450 : 6;
+  for (let i = 0; i < ops.length; i += size) {
     const b = fs.writeBatch(db);
-    for (const o of ops.slice(i, i + 450)) {
+    for (const o of ops.slice(i, i + size)) {
       const ref = fs.doc(db, o.col, o.id);
       if (o.op === 'delete') b.delete(ref);
       else if (o.op === 'update') b.update(ref, stamp(clean(o.data)));

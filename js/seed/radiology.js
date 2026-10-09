@@ -9,6 +9,17 @@
  */
 export const COLLEGE_NAME = 'كلية التقنيات الصحية والطبية';
 
+/**
+ * الكليات المُدارة في النظام. يمكن إضافة كليات أخرى لاحقاً من صفحة «الكليات».
+ * للكليات التي لا تقسم طلبتها إلى أقسام (مثل الصيدلة وطب الأسنان) يُنشأ «قسم عام» يمثل الكلية كاملة.
+ */
+export const EXTRA_COLLEGES = [
+  { name: 'كلية الصيدلة', short: 'الصيدلة', order: 2, stages: 5 },
+  { name: 'كلية طب الأسنان', short: 'طب الأسنان', order: 3, stages: 5 },
+];
+export const OTHER_COLLEGES_NAME = 'جهات أخرى (خارج النظام)';
+export const SCHEMA_VERSION = 2;
+
 export const DEPARTMENTS = [
   { key: 'rad', name: 'قسم تقنيات الأشعة والسونار', short: 'الأشعة' },
   { key: 'ch', name: 'قسم تقنيات صحة المجتمع', short: 'صحة المجتمع' },
@@ -62,11 +73,32 @@ export const DEFAULT_SETTINGS = {
   dayStart: 480,                  // 8:00
   dayEnd: 1200,                   // 20:00
   slotMinutes: 30,
+  schemaVersion: SCHEMA_VERSION,
   shifts: { morning: { start: 480, end: 840 }, evening: { start: 840, end: 1200 } },
   maxTheoryBlock: 2,
   maxPracticalBlock: 3,
   maxDailyHours: 6,
 };
+
+const ORDINAL = ['', 'الأولى', 'الثانية', 'الثالثة', 'الرابعة', 'الخامسة', 'السادسة'];
+
+/**
+ * عمليات إنشاء كلية جديدة مع «قسم عام» ومراحلها وشعبة صباحية لكل مرحلة.
+ * تُستخدم في البيانات الأولية وعند إضافة كلية من الواجهة.
+ */
+export function collegeStructureOps(uid, { name, short = '', order = 50, stages = 4, own = true, generalDept = true }) {
+  const ops = [];
+  const put = (col, data, id = uid()) => { ops.push({ op: 'set', col, id, data }); return id; };
+  const collegeId = put('colleges', { name, short, order, own });
+  if (generalDept) {
+    const deptId = put('departments', { name, short: short || name, collegeId, general: true });
+    for (let level = 1; level <= stages; level++) {
+      const stageId = put('stages', { deptId, level, name: `المرحلة ${ORDINAL[level] || level}` });
+      put('groups', { deptId, stageId, shift: 'morning', name: 'صباحي', students: 0 });
+    }
+  }
+  return { ops, collegeId };
+}
 
 /**
  * بناء عمليات الكتابة للبيانات الأولية.
@@ -77,8 +109,9 @@ export function seedOps(uid) {
   const put = (col, data, id = uid()) => { ops.push({ op: 'set', col, id, data }); return id; };
 
   put('settings', DEFAULT_SETTINGS, 'app');
-  const collegeId = put('colleges', { name: COLLEGE_NAME, own: true });
-  put('colleges', { name: 'كليات أخرى في الجامعة', own: false });
+  const collegeId = put('colleges', { name: COLLEGE_NAME, short: 'التقنيات الصحية', order: 1, own: true });
+  for (const c of EXTRA_COLLEGES) ops.push(...collegeStructureOps(uid, c).ops);
+  put('colleges', { name: OTHER_COLLEGES_NAME, order: 99, own: false });
 
   const deptIds = {};
   for (const d of DEPARTMENTS) deptIds[d.key] = put('departments', { name: d.name, short: d.short, collegeId });
@@ -114,5 +147,28 @@ export function seedOps(uid) {
   }
 
   for (const r of SAMPLE_ROOMS) put('rooms', { ...r, collegeId, building: 'بناية الكلية', sample: true });
+  return ops;
+}
+
+/**
+ * ترقية بيانات موجودة من الإصدار الأول (كلية واحدة) إلى الإصدار الثاني (عدة كليات):
+ * تُضاف كليتا الصيدلة وطب الأسنان إن لم تكونا موجودتين، ويُرتّب ظهور الكليات.
+ * تُنفَّذ مرة واحدة فقط عند دخول المشرف العام.
+ */
+export function migrationOps(data, uid) {
+  const s = data.settings.find((x) => x.id === 'app');
+  if (!s || (s.schemaVersion || 1) >= SCHEMA_VERSION) return [];
+  const ops = [];
+  const names = new Set(data.colleges.map((c) => String(c.name).trim()));
+  for (const c of data.colleges) {
+    if (c.name === COLLEGE_NAME) {
+      ops.push({ op: 'update', col: 'colleges', id: c.id, data: { own: true, order: c.order ?? 1, short: c.short || 'التقنيات الصحية' } });
+    } else if (c.own === false) {
+      const rename = c.name === 'كليات أخرى في الجامعة' ? { name: OTHER_COLLEGES_NAME } : {};
+      ops.push({ op: 'update', col: 'colleges', id: c.id, data: { ...rename, order: c.order ?? 99 } });
+    }
+  }
+  for (const c of EXTRA_COLLEGES) if (!names.has(c.name)) ops.push(...collegeStructureOps(uid, c).ops);
+  ops.push({ op: 'update', col: 'settings', id: 'app', data: { schemaVersion: SCHEMA_VERSION } });
   return ops;
 }

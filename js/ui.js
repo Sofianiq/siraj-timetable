@@ -93,7 +93,7 @@ export function buildForm(fields, values = {}) {
     if (f.type === 'select') {
       input = `<select id="${id}" name="${f.key}" ${f.required ? 'required' : ''}>
         ${f.placeholder !== false ? `<option value="">${esc(f.placeholder || '— اختر —')}</option>` : ''}
-        ${(f.options || []).map((o) => `<option value="${esc(o.value)}" ${String(o.value) === String(v) ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+        ${selectOptions(f.options || [], v)}
       </select>`;
     } else if (f.type === 'multiselect') {
       const set = new Set(Array.isArray(v) ? v : []);
@@ -117,6 +117,14 @@ export function buildForm(fields, values = {}) {
   }
   form.addEventListener('submit', (e) => e.preventDefault());
   return form;
+}
+
+/** خيارات <select>؛ إن احتوت الخيارات على group تُجمع في <optgroup> */
+function selectOptions(options, v) {
+  const one = (o) => `<option value="${esc(o.value)}" ${String(o.value) === String(v) ? 'selected' : ''}>${esc(o.label)}</option>`;
+  const groups = [...new Set(options.map((o) => o.group || ''))];
+  if (groups.length <= 1) return options.map(one).join('');
+  return groups.map((g) => `<optgroup label="${esc(g)}">${options.filter((o) => (o.group || '') === g).map(one).join('')}</optgroup>`).join('');
 }
 
 /** قراءة قيم النموذج مع التحقق من الحقول الإلزامية */

@@ -1,7 +1,7 @@
 /**
  * دوال مساعدة على نموذج البيانات: الأسماء المعروضة، الفصل الحالي، تصفية المحاضرات حسب طريقة العرض.
  */
-import { store, byId, settings } from './store.js';
+import { store, byId, settings, collegeOfDept, myCollegeId } from './store.js';
 import { buildCtx } from './conflicts.js';
 import { STAGE_NAMES, SHIFTS, SEMESTERS } from './timeutil.js';
 
@@ -29,6 +29,55 @@ export function ctx() {
 export const sortByName = (arr) => [...arr].sort((a, b) => String(a.name).localeCompare(String(b.name), 'ar'));
 
 export function deptName(id) { return byId('departments', id)?.name || ''; }
+
+/* ------------------------------ الكليات ------------------------------ */
+const byOrder = (a, b) => (a.order ?? 50) - (b.order ?? 50) || String(a.name).localeCompare(String(b.name), 'ar');
+/** الكليات المُدارة في النظام (لها أقسام وجداول) مرتبة */
+export const managedColleges = () => store.data.colleges.filter((c) => c.own !== false).sort(byOrder);
+export const allCollegesSorted = () => [...store.data.colleges].sort(byOrder);
+export function collegeName(id) { return byId('colleges', id)?.name || ''; }
+export function collegeShort(id) { const c = byId('colleges', id); return c?.short || c?.name || ''; }
+export { collegeOfDept };
+
+/** الكلية المختارة حالياً في أعلى الصفحة ('' = كل الكليات). تُحفظ في متصفح المستخدم. */
+const COLLEGE_KEY = 'siraj-current-college';
+let currentCollege;
+export function currentCollegeId() {
+  if (currentCollege === undefined) {
+    try { currentCollege = localStorage.getItem(COLLEGE_KEY); } catch { currentCollege = null; }
+    if (currentCollege === null) currentCollege = myCollegeId() || '';
+  }
+  if (currentCollege && !byId('colleges', currentCollege)) currentCollege = '';
+  return currentCollege;
+}
+export function setCurrentCollege(id) {
+  currentCollege = id || '';
+  try { localStorage.setItem(COLLEGE_KEY, currentCollege); } catch { /* وضع التصفح الخاص */ }
+}
+
+/** أقسام كلية معيّنة (أو كل الأقسام إن لم تُحدد) مرتبة حسب الكلية ثم الاسم */
+export function deptsOfCollege(collegeId = '') {
+  const order = new Map(allCollegesSorted().map((c, i) => [c.id, i]));
+  return store.data.departments
+    .filter((d) => !collegeId || d.collegeId === collegeId)
+    .sort((a, b) => (order.get(a.collegeId) ?? 999) - (order.get(b.collegeId) ?? 999) ||
+      (b.general ? 1 : 0) - (a.general ? 1 : 0) || String(a.name).localeCompare(String(b.name), 'ar'));
+}
+
+/** خيارات <select> للأقسام مجمّعة حسب الكلية */
+export function deptOptionsHTML(selected, { collegeId = '', filter = () => true, placeholder = '' } = {}) {
+  const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const depts = deptsOfCollege(collegeId).filter(filter);
+  const groups = new Map();
+  for (const d of depts) {
+    if (!groups.has(d.collegeId)) groups.set(d.collegeId, []);
+    groups.get(d.collegeId).push(d);
+  }
+  const opt = (d) => `<option value="${esc(d.id)}" ${d.id === selected ? 'selected' : ''}>${esc(d.general ? `${d.name} (الكلية كاملة)` : d.name)}</option>`;
+  const body = groups.size <= 1 ? depts.map(opt).join('')
+    : [...groups].map(([cid, list]) => `<optgroup label="${esc(collegeName(cid) || 'بدون كلية')}">${list.map(opt).join('')}</optgroup>`).join('');
+  return (placeholder ? `<option value="">${esc(placeholder)}</option>` : '') + body;
+}
 export function stageOf(group) { return group ? byId('stages', group.stageId) : null; }
 export function stageName(stage) { return stage ? (stage.name || `المرحلة ${STAGE_NAMES[stage.level] || stage.level}`) : ''; }
 
@@ -37,15 +86,18 @@ export function groupLabel(g, { withDept = false } = {}) {
   if (!g) return '';
   const st = stageOf(g);
   const parts = [stageName(st), SHIFTS[g.shift] || '', g.name && g.name !== SHIFTS[g.shift] ? g.name : ''].filter(Boolean);
-  if (withDept) parts.unshift(deptName(g.deptId));
+  if (withDept) {
+    const d = byId('departments', g.deptId);
+    parts.unshift(d?.general ? collegeShort(d.collegeId) || d.name : d?.short || d?.name || '');
+  }
   return parts.join(' / ');
 }
 
 const shiftOrder = (s) => (s === 'evening' ? 1 : 0);
 
-export function groupsSorted(deptId) {
+export function groupsSorted(deptId, { collegeId = '' } = {}) {
   return store.data.groups
-    .filter((g) => !deptId || g.deptId === deptId)
+    .filter((g) => (!deptId || g.deptId === deptId) && (!collegeId || collegeOfDept(g.deptId) === collegeId))
     .map((g) => ({ g, st: stageOf(g) }))
     .sort((a, b) => deptName(a.g.deptId).localeCompare(deptName(b.g.deptId), 'ar') ||
       (a.st?.level || 0) - (b.st?.level || 0) || shiftOrder(a.g.shift) - shiftOrder(b.g.shift) ||
@@ -64,6 +116,7 @@ export function subjectName(s) {
 export const VIEW_TYPES = {
   group: 'المرحلة والشعبة',
   dept: 'القسم',
+  college: 'الكلية',
   teacher: 'الأستاذ',
   room: 'القاعة / المختبر',
 };
@@ -75,34 +128,46 @@ export function sessionsForView(type, id, term = currentTerm()) {
   switch (type) {
     case 'group': return list.filter((s) => (s.groupIds || []).includes(id));
     case 'dept': return list.filter((s) => s.deptId === id);
+    case 'college': return list.filter((s) => s.deptId && collegeOfDept(s.deptId) === id);
     case 'teacher': return list.filter((s) => s.teacherId === id);
     case 'room': return list.filter((s) => s.roomId === id);
     default: return [];
   }
 }
 
-/** عنوان ومعلومات ترويسة الجدول (للعرض والتصدير) */
+/** عنوان ومعلومات ترويسة الجدول (للعرض والتصدير). collegeId يحدد اسم الكلية في رأس الصفحة المطبوعة. */
 export function viewHeader(type, id) {
   const s = settings();
-  const info = { title: '', lines: [] };
+  const info = { title: '', lines: [], collegeId: '' };
+  const deptLine = (deptId) => {
+    const d = byId('departments', deptId);
+    return d && !d.general ? [['القسم', d.name]] : [];
+  };
   if (type === 'group') {
     const g = byId('groups', id);
     const st = stageOf(g);
-    info.title = `جدول ${stageName(st)} — ${deptName(g?.deptId)}`;
+    const d = byId('departments', g?.deptId);
+    info.collegeId = d?.collegeId || '';
+    info.title = `جدول ${stageName(st)} — ${d?.name || ''}`;
     info.lines = [
-      ['القسم', deptName(g?.deptId)], ['المرحلة', stageName(st)],
+      ...deptLine(g?.deptId), ['المرحلة', stageName(st)],
       ['نوع الدراسة', SHIFTS[g?.shift] || ''], ['الشعبة', g?.name && g.name !== SHIFTS[g?.shift] ? g.name : ''],
       ['عدد الطلبة', g?.students || '—'],
     ];
   } else if (type === 'dept') {
+    info.collegeId = collegeOfDept(id) || '';
     info.title = `الجدول العام — ${deptName(id)}`;
-    info.lines = [['القسم', deptName(id)]];
+    info.lines = deptLine(id);
+  } else if (type === 'college') {
+    info.collegeId = id;
+    info.title = `الجدول العام — ${collegeName(id)}`;
   } else if (type === 'teacher') {
     const t = byId('teachers', id);
     info.title = `جدول الأستاذ: ${t?.name || ''}`;
-    info.lines = [['الأستاذ', t?.name || ''], ['القسم', deptName(t?.deptId)]];
+    info.lines = [['الأستاذ', t?.name || ''], ...(t?.title ? [['اللقب العلمي', t.title]] : [])];
   } else if (type === 'room') {
     const r = byId('rooms', id);
+    info.collegeId = r?.collegeId || '';
     info.title = `جدول ${r?.name || ''}`;
     info.lines = [['القاعة/المختبر', r?.name || ''], ['السعة', r?.capacity || '—'], ['المبنى', r?.building || '—']];
   }

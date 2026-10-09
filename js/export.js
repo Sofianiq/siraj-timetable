@@ -5,8 +5,8 @@
 import { DAY_NAMES, formatRange, formatTime, assignLanes } from './timeutil.js';
 import { esc, el, loadScript, download, colorFor } from './ui.js';
 import { settings, byId } from './store.js';
-import { sessionsForView, viewHeader, sessionLines, subjectName, teacherName, roomName, groupLabel } from './model.js';
-import { UNIVERSITY, COLLEGE, DEVELOPER } from './config.js';
+import { sessionsForView, viewHeader, sessionLines, subjectName, teacherName, roomName, groupLabel, collegeName } from './model.js';
+import { UNIVERSITY } from './branding.js';
 
 const HTML2CANVAS = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
 const JSPDF = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
@@ -71,7 +71,7 @@ export function tableHTML(m) {
   return `
   <div class="print-page">
     <div class="print-head">
-      <div class="ph-org"><div>${esc(UNIVERSITY)}</div><div>${esc(COLLEGE)}</div></div>
+      <div class="ph-org"><div>${esc(UNIVERSITY)}</div>${m.header.collegeId ? `<div>${esc(collegeName(m.header.collegeId))}</div>` : ''}</div>
       <div class="ph-title">${esc(m.header.title)}</div>
       <div class="ph-info">${info}</div>
     </div>
@@ -80,7 +80,7 @@ export function tableHTML(m) {
       <tbody>${body}</tbody>
     </table>
     ${m.count ? '' : '<p class="muted" style="text-align:center">لا توجد محاضرات مجدولة</p>'}
-    <div class="print-foot"><span>تاريخ الإصدار: ${new Date().toLocaleDateString('ar-IQ')}</span><span>إعداد وتطوير: ${esc(DEVELOPER)}</span></div>
+    <div class="print-foot"><span>تاريخ الإصدار: ${new Date().toLocaleDateString('ar-IQ')}</span></div>
   </div>`;
 }
 
@@ -136,7 +136,7 @@ export async function exportPDF(tables, filename) {
 export async function exportExcel(tables, filename) {
   await loadScript(EXCELJS);
   const wb = new window.ExcelJS.Workbook();
-  wb.creator = DEVELOPER;
+  wb.creator = UNIVERSITY;
   wb.created = new Date();
   const used = new Set();
   const thin = { style: 'thin', color: { argb: 'FF9AA5B1' } };
@@ -153,7 +153,7 @@ export async function exportExcel(tables, filename) {
       views: [{ rightToLeft: true, state: 'frozen', ySplit: 6, xSplit: 1 }],
       pageSetup: { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true,
         margins: { left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 } },
-      headerFooter: { oddFooter: `&Rإعداد وتطوير: ${DEVELOPER}&Lصفحة &P من &N` },
+      headerFooter: { oddFooter: '&Lصفحة &P من &N' },
     });
     const totalCols = 1 + m.slots.length;
     const title = (row, text, size, fill) => {
@@ -165,7 +165,7 @@ export async function exportExcel(tables, filename) {
       if (fill) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } };
       ws.getRow(row).height = size * 1.9;
     };
-    title(1, `${UNIVERSITY} — ${COLLEGE}`, 14, 'FF0F4C81');
+    title(1, [UNIVERSITY, collegeName(m.header.collegeId)].filter(Boolean).join(' — '), 14, 'FF0F4C81');
     title(2, m.header.title, 13);
     title(3, m.header.lines.filter(([, v]) => v !== '' && v != null).map(([k, v]) => `${k}: ${v}`).join('    |    '), 10);
     ws.getRow(4).height = 6;
@@ -225,7 +225,7 @@ export async function exportExcel(tables, filename) {
       c.alignment = { horizontal: 'center', vertical: 'middle' };
       c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F0FA' } };
     }
-    ws.getCell(row + 1, 1).value = `تاريخ الإصدار: ${new Date().toLocaleDateString('ar-IQ')} — إعداد وتطوير: ${DEVELOPER}`;
+    ws.getCell(row + 1, 1).value = `تاريخ الإصدار: ${new Date().toLocaleDateString('ar-IQ')}`;
     ws.mergeCells(row + 1, 1, row + 1, totalCols);
     ws.getCell(row + 1, 1).font = { name: 'Arial', size: 9, italic: true, color: { argb: 'FF6B7280' } };
     ws.pageSetup.printArea = `A1:${colLetter(totalCols)}${row + 1}`;
