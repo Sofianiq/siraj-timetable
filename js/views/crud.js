@@ -10,8 +10,9 @@ import { esc, el, $, $$, modal, toast, confirmDialog, buildForm, readForm, loadS
 import { ROOM_TYPES, SHIFTS, STAGE_NAMES, SEMESTERS, DAY_NAMES, formatTime } from '../timeutil.js';
 import {
   sortByName, deptName, groupLabel, teacherName, collegeName, collegeShort, managedColleges, allCollegesSorted,
-  currentCollegeId, deptsOfCollege, deptOptionsHTML,
+  currentCollegeId, deptsOfCollege, deptOptionsHTML, teacherCollege, teacherColleges, sharedInto,
 } from '../model.js';
+import { normPerson } from '../text.js';
 import { collegeStructureOps } from '../seed/radiology.js';
 import { themeOptions, themeSwatch, themeKeyForDept } from '../themes.js';
 
@@ -25,10 +26,26 @@ const deptOptions = (filter = () => true) => {
   return list.map((d) => ({ value: d.id, label: d.general ? `${d.name} (الكلية كاملة)` : d.name, group: collegeName(d.collegeId) }));
 };
 const collegeOptions = (filter = () => true) => opt(allCollegesSorted().filter(filter));
-/** الأساتذة مشتركون بين الكليات: مجمّعون حسب كلية القسم الأساسي */
-const teacherOptions = () => sortByName(store.data.teachers)
-  .map((t) => ({ value: t.id, label: t.name, group: collegeName(collegeOfDept(t.deptId)) || 'بدون قسم' }))
-  .sort((a, b) => a.group.localeCompare(b.group, 'ar'));
+/** خيارات الأساتذة: كادر الكلية المختارة (الأساسي ثم المشترك) أولاً، ثم بقية الكليات */
+const teacherOptions = () => {
+  const cur = currentCollegeId();
+  const rank = (t) => (!cur ? 0 : teacherCollege(t) === cur ? 0 : sharedInto(t, cur) ? 1 : 2);
+  const group = (t) => (rank(t) === 1 ? `مشتركون من كليات أخرى` : collegeName(teacherCollege(t)) || 'بدون قسم');
+  return sortByName(store.data.teachers).sort((a, b) => rank(a) - rank(b) || group(a).localeCompare(group(b), 'ar'))
+    .map((t) => ({ value: t.id, label: t.name + (rank(t) === 1 ? ` — ${collegeShort(teacherCollege(t))}` : ''), group: group(t) }));
+};
+/**
+ * القسم الأساسي للأستاذ: عند الإضافة أقسام الكلية المختارة فقط (والقسم العام يظهر باسم الكلية)،
+ * وعند التعديل كل الأقسام المسموح بها (لنقل الأستاذ إلى كلية أخرى)، والكلية المختارة أولاً.
+ */
+const deptLabel = (d) => (d?.general ? `${collegeName(d.collegeId)} (الكلية كاملة)` : d?.name || '');
+const teacherDeptOptions = (row) => {
+  const cur = currentCollegeId();
+  return deptsOfCollege('')
+    .filter((d) => d.id === row?.deptId || (canEditDept(d.id) && (!cur || row || d.collegeId === cur)))
+    .sort((a, b) => (a.collegeId === cur ? 0 : 1) - (b.collegeId === cur ? 0 : 1))
+    .map((d) => ({ value: d.id, label: deptLabel(d), group: collegeName(d.collegeId) }));
+};
 /** القسم الافتراضي عند الإضافة: قسم المستخدم أو أول قسم يحق له تعديله في الكلية المختارة */
 const defaultDept = () => myDeptId() || deptsOfCollege(currentCollegeId()).find((d) => canEditDept(d.id))?.id || '';
 const defaultCollege = () => myCollegeId() || currentCollegeId() || managedColleges()[0]?.id || '';
@@ -95,19 +112,51 @@ const ENTITIES = {
     sort: (a, b) => deptsOfCollege('').indexOf(a) - deptsOfCollege('').indexOf(b),
   },
   teachers: {
-    title: 'الأساتذة', single: 'أستاذ', icon: '👨‍🏫', deptScoped: true, collegeScoped: (r) => collegeOfDept(r.deptId),
-    help: 'الأساتذة مشتركون بين الكليات: يمكن إسناد أي أستاذ لمحاضرة في أي قسم أو كلية، ويمنع النظام تعارض أوقاته في كل الكليات. القسم الأساسي للتنظيم فقط.',
+    title: 'الأساتذة', single: 'أستاذ', icon: '👨‍🏫', deptScoped: true, collegeScoped: (r) => teacherColleges(r),
+    help: 'لكل كلية كادرها التدريسي. الأستاذ الذي يدرّس في أكثر من كلية يُسجَّل مرة واحدة في كليته الأساسية، ثم تُحدَّد الكليات الأخرى من خيار «يدرّس أيضاً في كليات أخرى؟»، فيظهر في كادرها تلقائياً، ويمنع النظام تعارض أوقاته بين الكليات.',
     canEdit: (r) => (r ? canEditDept(r.deptId) : canEditAny()),
-    fields: () => [
-      { key: 'name', label: 'الاسم', required: true, full: true, placeholder: 'مثال: د. أحمد علي' },
-      { key: 'title', label: 'اللقب العلمي', type: 'select', options: ['أستاذ', 'أستاذ مساعد', 'مدرس', 'مدرس مساعد', 'محاضر'].map((x) => ({ value: x, label: x })) },
-      { key: 'deptId', label: 'القسم الأساسي', type: 'select', options: deptOptions((d) => canEditDept(d.id)), required: true, default: defaultDept() },
-      { key: 'phone', label: 'الهاتف' },
-      { key: 'email', label: 'البريد الإلكتروني', type: 'email' },
-      { key: 'maxDailyHours', label: 'أقصى ساعات يومياً', type: 'number', min: 1, max: 12 },
-    ],
-    columns: [['name', 'الاسم'], ['title', 'اللقب'], [(r) => deptName(r.deptId), 'القسم'],
-      [(r) => collegeShort(collegeOfDept(r.deptId)), 'الكلية'],
+    fields: (row) => {
+      const depts = teacherDeptOptions(row);
+      const cur = currentCollegeId();
+      return [
+        { key: 'name', label: 'الاسم', required: true, full: true, placeholder: 'مثال: د. أحمد علي' },
+        { key: 'title', label: 'اللقب العلمي', type: 'select', options: ['أستاذ', 'أستاذ مساعد', 'مدرس', 'مدرس مساعد', 'محاضر'].map((x) => ({ value: x, label: x })) },
+        { key: 'deptId', label: 'الكلية / القسم الأساسي', type: 'select', options: depts, required: true,
+          default: depts.find((o) => o.value === defaultDept())?.value || (depts.length === 1 ? depts[0].value : ''),
+          help: depts.length ? 'الكلية التي ينتمي إليها الأستاذ في الأصل' : `لا توجد أقسام في ${collegeName(cur) || 'الكلية'} يمكنك الإضافة إليها. أضف قسماً من صفحة «الأقسام» أولاً.` },
+        { key: 'sharedColleges', label: 'يدرّس أيضاً في كليات أخرى؟', type: 'multiselect', full: true,
+          options: managedColleges().map((c) => ({ value: c.id, label: c.name })),
+          help: 'حدد كل كلية أخرى يدرّس فيها هذا الأستاذ، فيُضاف إلى كادرها تلقائياً ويمكن إسناد محاضراتها إليه، ويمنع النظام تعارض أوقاته بين الكليات.' },
+        { key: 'phone', label: 'الهاتف' },
+        { key: 'email', label: 'البريد الإلكتروني', type: 'email' },
+        { key: 'maxDailyHours', label: 'أقصى ساعات يومياً', type: 'number', min: 1, max: 12 },
+      ];
+    },
+    /** الكلية الأساسية لا تظهر ضمن «كليات أخرى» */
+    onForm: (form) => {
+      const dept = form.querySelector('[name="deptId"]');
+      const sync = () => {
+        const home = collegeOfDept(dept.value);
+        $$('[data-multi="sharedColleges"] input', form).forEach((i) => {
+          const isHome = i.value === home;
+          i.disabled = isHome;
+          if (isHome) i.checked = false;
+          i.closest('label').classList.toggle('muted', isHome);
+          i.closest('label').title = isHome ? 'الكلية الأساسية للأستاذ' : '';
+        });
+      };
+      dept?.addEventListener('change', sync);
+      sync();
+    },
+    beforeSave: (v) => ({ ...v, sharedColleges: (v.sharedColleges || []).filter((c) => c && c !== collegeOfDept(v.deptId)) }),
+    beforeCreate: (data) => confirmDuplicateTeacher(data),
+    banner: () => duplicateTeachersBanner(),
+    columns: [
+      [(r) => `${esc(r.name)}${sharedInto(r, currentCollegeId()) ? ` <span class="chip chip-shared" title="من كادر ${esc(collegeName(teacherCollege(r)))}">مشترك من ${esc(collegeShort(teacherCollege(r)))}</span>` : ''}`, 'الاسم', true],
+      ['title', 'اللقب'],
+      [(r) => (byId('departments', r.deptId)?.general ? '—' : deptName(r.deptId)), 'القسم الأساسي'],
+      [(r) => collegeShort(teacherCollege(r)), 'الكلية الأساسية'],
+      [(r) => (r.sharedColleges || []).filter((c) => c !== teacherCollege(r)).map((c) => collegeShort(c)).filter(Boolean).join('، ') || '—', 'يدرّس أيضاً في'],
       [(r) => availabilitySummary(r.availability), 'أوقات التوفر'],
       [(r) => store.data.sessions.filter((s) => s.teacherId === r.id).reduce((n, s) => n + (s.end - s.start) / 60, 0), 'ساعات مجدولة']],
     rowActions: [{ label: '🕒 أوقات التوفر', run: (r) => editAvailability(r) }],
@@ -176,7 +225,12 @@ export function renderEntity(container, col) {
   if (f.dept && cur && collegeOfDept(f.dept) !== cur) f.dept = '';
   let rows = [...store.data[col]];
   // تصفية حسب الكلية المختارة في الشريط العلوي (العناصر المشتركة بلا كلية تظهر دائماً)
-  if (cur && E.collegeScoped) rows = rows.filter((r) => { const c = E.collegeScoped(r); return c === cur || (E.sharedWhenEmpty && !c); });
+  if (cur && E.collegeScoped) {
+    rows = rows.filter((r) => {
+      const c = E.collegeScoped(r);
+      return (Array.isArray(c) ? c.includes(cur) : c === cur) || (E.sharedWhenEmpty && !c);
+    });
+  }
   if (f.dept) rows = rows.filter((r) => r.deptId === f.dept);
   if (f.q) rows = rows.filter((r) => JSON.stringify(r).includes(f.q));
   const deptOrder = new Map(deptsOfCollege('').map((d, i) => [d.id, i]));
@@ -188,6 +242,7 @@ export function renderEntity(container, col) {
   const page = el(`<div class="page">
     <div class="page-head"><h2>${E.icon} ${E.title}</h2>${cur && E.collegeScoped ? `<span class="term-badge">${esc(collegeName(cur))}</span>` : ''}<span class="muted">${rows.length} عنصر</span></div>
     ${E.help ? `<p class="muted">${esc(E.help)}</p>` : ''}
+    <div id="entityBanner"></div>
     <div class="toolbar">
       <input type="search" id="q" placeholder="بحث…" value="${esc(f.q)}">
       ${E.deptScoped ? `<select id="dept">${deptOptionsHTML(f.dept, { collegeId: cur, placeholder: cur ? 'كل أقسام الكلية' : 'كل الأقسام' })}</select>` : ''}
@@ -207,6 +262,8 @@ export function renderEntity(container, col) {
     </table></div>
   </div>`);
   container.appendChild(page);
+  const banner = E.banner?.();
+  if (banner) $('#entityBanner', page).appendChild(banner);
   // تسميات الأعمدة لعرض البطاقات على الهاتف
   $$('tbody tr', page).forEach((tr) => $$('td', tr).forEach((td, i) => { if (E.columns[i]) td.dataset.label = E.columns[i][1]; }));
 
@@ -227,8 +284,9 @@ export function renderEntity(container, col) {
 
 export async function editEntity(col, row, preset = {}) {
   const E = ENTITIES[col];
-  const fields = E.fields().filter((x) => !(row && x.createOnly));
+  const fields = E.fields(row).filter((x) => !(row && x.createOnly));
   const form = buildForm(fields, { ...preset, ...(row || {}) });
+  E.onForm?.(form, row);
   await modal({
     title: row ? `تعديل ${E.single}` : `إضافة ${E.single}`, body: form, size: 'lg',
     buttons: [{ label: 'حفظ', value: 'save', cls: 'btn-primary' }, { label: 'إلغاء', value: null }],
@@ -237,6 +295,12 @@ export async function editEntity(col, row, preset = {}) {
       let data = readForm(form, fields);
       if (E.beforeSave) data = E.beforeSave(data);
       if (!E.canEdit(data)) throw new Error('لا تملك صلاحية الحفظ في هذا القسم أو الكلية');
+      // فحص قبل الإنشاء (مثل الأستاذ المكرر): false يُبقي النموذج مفتوحاً، 'done' يعني أن الحفظ تم بطريقة أخرى
+      if (!row && E.beforeCreate) {
+        const r = await E.beforeCreate(data);
+        if (r === 'done') return true;
+        if (!r) return false;
+      }
       // customCreate يعيد عمليات، أو مراحل متتالية من العمليات (قواعد الأمان تتحقق من القسم بعد إنشائه)
       if (!row && E.customCreate) {
         const ops = E.customCreate(data);
@@ -340,6 +404,124 @@ async function editAvailability(t) {
       return true;
     },
   });
+}
+
+/* =============================== الأساتذة: التكرار والدمج =============================== */
+const teacherWhere = (t) => {
+  const d = byId('departments', t.deptId);
+  return d?.general ? collegeName(d.collegeId) : `${d?.name || 'بدون قسم'} — ${collegeName(d?.collegeId)}`;
+};
+/** عدد مع المعدود بالعربية: محاضرة واحدة، محاضرتان، 3 محاضرات، 11 محاضرة */
+const countAr = (n, [one, two, few, many]) => (n === 0 ? `لا ${many}` : n === 1 ? `${one} واحدة` : n === 2 ? two : n <= 10 ? `${n} ${few}` : `${n} ${many}`);
+const usage = (t) => ({
+  sessions: store.data.sessions.filter((s) => s.teacherId === t.id).length,
+  subjects: store.data.subjects.filter((s) => s.theoryTeacherId === t.id || s.practicalTeacherId === t.id).length,
+});
+
+/** عند إضافة أستاذ باسم موجود: هل هو الشخص نفسه؟ إن كان كذلك يُضاف إلى كادر الكلية بدل تكراره */
+async function confirmDuplicateTeacher(data) {
+  const key = normPerson(data.name);
+  const same = store.data.teachers.filter((t) => key && normPerson(t.name) === key);
+  if (!same.length) return true;
+  const target = collegeOfDept(data.deptId);
+  const inTarget = same.find((t) => teacherColleges(t).includes(target));
+  if (inTarget) {
+    const v = await modal({
+      title: '⚠️ الأستاذ موجود مسبقاً', size: 'sm',
+      body: `<p>«<b>${esc(inTarget.name)}</b>» موجود في كادر <b>${esc(collegeName(target))}</b> (${esc(teacherWhere(inTarget))}).</p>
+        <p class="muted">تكرار الأستاذ نفسه بسجلين يمنع النظام من كشف تعارض أوقاته.</p>`,
+      buttons: [{ label: 'إلغاء', value: false, cls: 'btn-primary' }, { label: 'أستاذ آخر بالاسم نفسه — أضفه', value: true }],
+    });
+    return v === true;
+  }
+  const t = same[0];
+  const canShare = canEditDept(t.deptId);
+  const v = await modal({
+    title: '👨‍🏫 هل هو الأستاذ نفسه؟', size: 'sm',
+    body: `<p>يوجد أستاذ بالاسم نفسه في كادر <b>${esc(collegeName(teacherCollege(t)))}</b>: «<b>${esc(t.name)}</b>» (${esc(teacherWhere(t))}).</p>
+      <p>إذا كان الشخص نفسه فلا تضفه مرة ثانية؛ يكفي إضافة <b>${esc(collegeName(target))}</b> إلى الكليات التي يدرّس فيها، فيظهر في كادرها ويمنع النظام تعارض أوقاته بين الكليتين.</p>
+      ${canShare ? '' : `<p class="muted">لا تملك صلاحية تعديل كادر ${esc(collegeName(teacherCollege(t)))}. اطلب من مسؤولها أو من مدير النظام إضافة كليتك، ويمكنك الآن اختياره مباشرة عند إضافة المحاضرة من مجموعة «كليات أخرى».</p>`}`,
+    buttons: canShare
+      ? [{ label: `نعم، الشخص نفسه — أضفه إلى كادر ${collegeShort(target)}`, value: 'share', cls: 'btn-primary' }, { label: 'لا، أستاذ آخر', value: 'new' }, { label: 'إلغاء', value: null }]
+      : [{ label: 'إلغاء', value: null, cls: 'btn-primary' }, { label: 'لا، أستاذ آخر — أضفه', value: 'new' }],
+  });
+  if (v === 'share') {
+    await batchWrite([{ op: 'update', col: 'teachers', id: t.id, data: { sharedColleges: [...new Set([...(t.sharedColleges || []), target])] } }]);
+    toast(`أُضيف «${t.name}» إلى كادر ${collegeName(target)} كأستاذ مشترك`, 'success', 5000);
+    return 'done';
+  }
+  return v === 'new';
+}
+
+/** مجموعات الأساتذة المكررين (الاسم نفسه بعد حذف اللقب) */
+function duplicateTeacherGroups() {
+  const map = new Map();
+  for (const t of store.data.teachers) {
+    const k = normPerson(t.name);
+    if (!k) continue;
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(t);
+  }
+  return [...map.values()].filter((g) => g.length > 1);
+}
+
+function duplicateTeachersBanner() {
+  const cur = currentCollegeId();
+  const groups = duplicateTeacherGroups().filter((g) => !cur || g.some((t) => teacherColleges(t).includes(cur)));
+  if (!groups.length) return null;
+  const box = el(`<div class="banner warn">⚠️ <b>أساتذة مسجّلون أكثر من مرة:</b> سجلان للشخص نفسه يمنعان النظام من كشف تعارض أوقاته. ادمجهما في سجل واحد.
+    <div class="dup-list">${groups.map((g, i) => `<span class="dup-item">«${esc(g[0].name)}» (${g.length === 2 ? 'سجلّان' : `${g.length} سجلات`})
+      ${canMerge(g) ? `<button class="btn btn-sm" data-merge="${i}">دمج</button>` : ''}</span>`).join('')}</div></div>`);
+  box.addEventListener('click', (e) => { const b = e.target.closest('[data-merge]'); if (b) mergeTeachers(groups[b.dataset.merge]); });
+  return box;
+}
+
+/** الدمج يعدّل محاضرات ومواد كل من يستخدم السجلات، فيلزم صلاحية عليها كلها */
+function canMerge(group) {
+  if (isAdmin()) return true;
+  const ids = new Set(group.map((t) => t.id));
+  return group.every((t) => canEditDept(t.deptId))
+    && store.data.sessions.filter((s) => ids.has(s.teacherId)).every((s) => canEditDept(s.deptId))
+    && store.data.subjects.filter((s) => ids.has(s.theoryTeacherId) || ids.has(s.practicalTeacherId)).every((s) => canEditDept(s.deptId));
+}
+
+async function mergeTeachers(group) {
+  const ranked = [...group].sort((a, b) => usage(b).sessions - usage(a).sessions);
+  const body = el(`<div>
+    <p>اختر السجل الذي يبقى. تُنقل إليه كل المحاضرات والمواد المسندة للسجلات الأخرى، وتُجمع كلياته، ثم تُحذف السجلات الأخرى.</p>
+    <div class="checklist">${ranked.map((t, i) => {
+      const u = usage(t);
+      return `<label class="chk"><input type="radio" name="keep" value="${t.id}" ${i === 0 ? 'checked' : ''}>
+        <b>${esc(t.name)}</b> — ${esc(teacherWhere(t))} <small class="muted">(${countAr(u.sessions, ['محاضرة', 'محاضرتان', 'محاضرات', 'محاضرة'])}، ${countAr(u.subjects, ['مادة', 'مادتان', 'مواد', 'مادة'])}${t.availability && Object.keys(t.availability).length ? '، له أوقات توفر' : ''})</small></label>`;
+    }).join('')}</div>
+    <p class="muted small">بعد الدمج قد تظهر تعارضات كانت مخفية (الأستاذ نفسه في محاضرتين بالوقت نفسه). راجع صفحة «التعارضات».</p>
+  </div>`);
+  const ok = await modal({ title: `دمج «${group[0].name}»`, body, size: 'sm',
+    buttons: [{ label: 'دمج', value: true, cls: 'btn-primary' }, { label: 'إلغاء', value: false }] });
+  if (!ok) return;
+  const keepId = $('input[name="keep"]:checked', body)?.value || ranked[0].id;
+  const keep = byId('teachers', keepId);
+  const others = group.filter((t) => t.id !== keepId);
+  const otherIds = new Set(others.map((t) => t.id));
+  const colleges = new Set([...(keep.sharedColleges || []), ...others.flatMap((t) => teacherColleges(t))]);
+  colleges.delete(teacherCollege(keep));
+  const keepData = { sharedColleges: [...colleges] };
+  const hasAvail = (t) => t.availability && Object.values(t.availability).some((x) => x?.length);
+  if (!hasAvail(keep)) { const a = others.find(hasAvail); if (a) keepData.availability = a.availability; }
+  for (const k of ['title', 'phone', 'email', 'maxDailyHours']) if (!keep[k]) { const o = others.find((t) => t[k]); if (o) keepData[k] = o[k]; }
+  const ops = [{ op: 'update', col: 'teachers', id: keepId, data: keepData }];
+  for (const s of store.data.sessions.filter((x) => otherIds.has(x.teacherId))) ops.push({ op: 'update', col: 'sessions', id: s.id, data: { teacherId: keepId } });
+  for (const s of store.data.subjects) {
+    const d = {};
+    if (otherIds.has(s.theoryTeacherId)) d.theoryTeacherId = keepId;
+    if (otherIds.has(s.practicalTeacherId)) d.practicalTeacherId = keepId;
+    if (Object.keys(d).length) ops.push({ op: 'update', col: 'subjects', id: s.id, data: d });
+  }
+  for (const t of others) ops.push({ op: 'delete', col: 'teachers', id: t.id });
+  try {
+    await batchWrite(ops);
+    toast(`تم دمج «${keep.name}» في سجل واحد. راجع صفحة التعارضات.`, 'success', 6000);
+  } catch (e) { toast('تعذر الدمج: ' + e.message, 'error'); }
 }
 
 /* =============================== المراحل والشعب =============================== */

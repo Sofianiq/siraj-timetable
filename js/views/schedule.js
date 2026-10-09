@@ -10,7 +10,7 @@ import { DAY_NAMES, SESSION_KINDS, SHIFTS, toHHMM, toMinutes, formatRange } from
 import {
   ctx, currentTerm, termSessions, sessionsForView, groupsSorted, groupLabel, deptName, sortByName, deptTables, collegeTables, looseLabel,
   VIEW_TYPES, viewHeader, stageName, currentCollegeId, setCurrentCollege, managedColleges, deptsOfCollege, deptOptionsHTML,
-  collegeName, collegeShort,
+  collegeName, collegeShort, teacherCollege, teachesIn, sharedInto,
 } from '../model.js';
 import { exportPDF, exportExcel, printTables, savePDF, previewTables, setPrintProvider } from '../export.js';
 
@@ -37,8 +37,10 @@ function optionsFor(type, deptId, cur) {
   if (type === 'dept') return deptsOfCollege(cur).map((d) => ({ value: d.id, label: d.name, group: cur ? '' : collegeName(d.collegeId) }));
   if (type === 'college') return managedColleges().map((c) => ({ value: c.id, label: c.name }));
   if (type === 'teacher') {
-    return byCollegeGroups(store.data.teachers, (t) => collegeOfDept(t.deptId),
-      (t) => t.name + (t.deptId ? ` — ${byId('departments', t.deptId)?.short || deptName(t.deptId)}` : ''), cur);
+    // كادر الكلية المختارة يشمل الأساتذة المشتركين فيها من كليات أخرى
+    return byCollegeGroups(store.data.teachers, (t) => (cur && teachesIn(t, cur) ? cur : teacherCollege(t)),
+      (t) => t.name + (sharedInto(t, cur) ? ` — مشترك من ${collegeShort(teacherCollege(t))}`
+        : t.deptId ? ` — ${byId('departments', t.deptId)?.short || deptName(t.deptId)}` : ''), cur);
   }
   if (type === 'room') return byCollegeGroups(store.data.rooms, (r) => r.collegeId, (r) => `${r.name}${r.capacity ? ` (${r.capacity})` : ''}`, cur);
   return [];
@@ -387,21 +389,32 @@ export async function openEditor(session, defaults = {}) {
     const stage = store.data.stages.find((x) => x.deptId === sub.deptId && Number(x.level) === Number(sub.stageLevel));
     $$('#groupsBox input', body).forEach((i) => { i.checked = !!stage && byId('groups', i.value)?.stageId === stage.id; });
   }
-  /** الأساتذة مشتركون بين الكليات: أساتذة القسم أولاً ثم الكلية ثم بقية الكليات */
+  /** كادر الكلية: أساتذة القسم، ثم بقية كادر الكلية، ثم المشتركون فيها من كليات أخرى، وأخيراً أساتذة الكليات الأخرى */
   function refreshTeachers() {
     const deptId = f('deptId').value;
     const cid = collegeOfDept(deptId);
     const keep = f('teacherId').value || s.teacherId;
     const ts = sortByName(store.data.teachers);
     const own = ts.filter((t) => t.deptId === deptId);
-    const college = ts.filter((t) => t.deptId !== deptId && cid && collegeOfDept(t.deptId) === cid);
-    const other = ts.filter((t) => !own.includes(t) && !college.includes(t));
+    const college = ts.filter((t) => t.deptId !== deptId && cid && teacherCollege(t) === cid);
+    const shared = ts.filter((t) => sharedInto(t, cid));
+    const other = ts.filter((t) => !own.includes(t) && !college.includes(t) && !shared.includes(t));
     const opt = (t, tag = '') => `<option value="${t.id}" ${t.id === keep ? 'selected' : ''}>${esc(t.name)}${tag}</option>`;
-    const tagOf = (t) => (t.deptId ? ` — ${esc(collegeShort(collegeOfDept(t.deptId)))}` : '');
+    const tagOf = (t) => (t.deptId ? ` — ${esc(collegeShort(teacherCollege(t)))}` : '');
+    const deptShort = (t) => (byId('departments', t.deptId)?.general ? '' : ` — ${esc(byId('departments', t.deptId)?.short || deptName(t.deptId))}`);
     f('teacherId').innerHTML = '<option value="">— بدون —</option>' +
-      (own.length ? `<optgroup label="أساتذة القسم">${own.map((t) => opt(t)).join('')}</optgroup>` : '') +
-      (college.length ? `<optgroup label="أساتذة الكلية">${college.map((t) => opt(t, ` — ${esc(byId('departments', t.deptId)?.short || deptName(t.deptId))}`)).join('')}</optgroup>` : '') +
-      (other.length ? `<optgroup label="أساتذة من كليات أخرى (مشتركون)">${other.map((t) => opt(t, tagOf(t))).join('')}</optgroup>` : '');
+      (own.length ? `<optgroup label="${byId('departments', deptId)?.general ? 'كادر الكلية' : 'أساتذة القسم'}">${own.map((t) => opt(t)).join('')}</optgroup>` : '') +
+      (college.length ? `<optgroup label="كادر الكلية">${college.map((t) => opt(t, deptShort(t))).join('')}</optgroup>` : '') +
+      (shared.length ? `<optgroup label="مشتركون من كليات أخرى">${shared.map((t) => opt(t, tagOf(t))).join('')}</optgroup>` : '') +
+      (other.length ? `<optgroup label="أساتذة كليات أخرى (يُضاف إلى كادر هذه الكلية عند اختياره)">${other.map((t) => opt(t, tagOf(t))).join('')}</optgroup>` : '');
+  }
+  /** اختيار أستاذ من كلية أخرى غير مشترك فيها: يُضاف إلى كادر كلية المحاضرة تلقائياً (إن سمحت الصلاحية) */
+  function shareOps(v) {
+    const t = byId('teachers', v.teacherId);
+    const cid = collegeOfDept(v.deptId);
+    if (!t || !cid || teachesIn(t, cid) || !canEditDept(t.deptId)) return [];
+    toast(`أُضيف «${t.name}» إلى كادر ${collegeName(cid)} كأستاذ مشترك`, 'info', 5000);
+    return [{ op: 'update', col: 'teachers', id: t.id, data: { sharedColleges: [...new Set([...(t.sharedColleges || []), cid])] } }];
   }
   /** القاعات مشتركة على مستوى الجامعة؛ يظهر اسم الكلية المالكة إن كانت غير كلية المحاضرة */
   function refreshRooms() {
@@ -489,12 +502,12 @@ export async function openEditor(session, defaults = {}) {
           v.start = v.end; v.end = v.start + dur;
           const dupIssues = checkSession({ ...v, id: '__dup__' }, termSessions(), ctx());
           if (hasErrors(dupIssues)) throw new Error(`لا يمكن إنشاء النسخة بعد المحاضرة مباشرة: ${dupIssues.find((i) => i.level === 'error').message}`);
-          await batchWrite([{ op: 'set', col: 'sessions', id: uid(), data: { ...v, auto: false } }]);
+          await batchWrite([{ op: 'set', col: 'sessions', id: uid(), data: { ...v, auto: false } }, ...shareOps(v)]);
           toast('تم إنشاء نسخة بعد المحاضرة مباشرة — اسحبها إلى المكان المناسب', 'success');
           return true;
         }
         if (hasErrors(issues)) throw new Error('لا يمكن الحفظ بسبب وجود تعارض. عدّل الوقت أو القاعة أو الأستاذ.');
-        await batchWrite([{ op: isNew ? 'set' : 'update', col: 'sessions', id: s.id || uid(), data: { ...v, auto: false } }]);
+        await batchWrite([{ op: isNew ? 'set' : 'update', col: 'sessions', id: s.id || uid(), data: { ...v, auto: false } }, ...shareOps(v)]);
         toast(isNew ? 'تمت الإضافة' : 'تم الحفظ', 'success');
         return true;
       }

@@ -7,6 +7,9 @@
  *
  * القاعات والمختبرات أمثلة يجب تعديلها لتطابق الواقع.
  */
+import { normName } from '../text.js';
+
+export { normName };
 export const COLLEGE_NAME = 'كلية التقنيات الصحية والطبية';
 
 /**
@@ -18,7 +21,7 @@ export const EXTRA_COLLEGES = [
   { name: 'كلية طب الأسنان', short: 'طب الأسنان', order: 3, stages: 5 },
 ];
 export const OTHER_COLLEGES_NAME = 'جهات أخرى (خارج النظام)';
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const DEPARTMENTS = [
   { key: 'rad', name: 'قسم تقنيات الأشعة والسونار', short: 'الأشعة' },
@@ -150,13 +153,10 @@ export function seedOps(uid) {
   return ops;
 }
 
-/** توحيد كتابة الأسماء للمقارنة: «كلية طب الاسنان» = «كلية طب الأسنان» */
-export const normName = (v) => String(v || '').trim()
-  .replace(/[\u064B-\u0652\u0640]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/\s+/g, ' ');
-
 /**
  * ترقية البيانات الموجودة إلى الإصدار الحالي. تُنفَّذ مرة واحدة فقط عند دخول مدير النظام.
  * - الإصدار 2 (عدة كليات): تُضاف كليتا الصيدلة وطب الأسنان، ويُرتّب ظهور الكليات.
+ * - الإصدار 4: كل كلية مُدارة من الكليتين بلا أقسام يُنشأ لها «قسم عام» بمراحله وشعبه (لإضافة الأساتذة والجداول).
  * - الإصدار 3: إذا كانت الصيدلة أو طب الأسنان مسجّلة سابقاً كـ«جهة خارجية» تُحوَّل إلى كلية مُدارة (وتُدمج النسخ المكررة)،
  *   وتُنشأ شعبة «صباحي» لكل مرحلة ليس لها شعب، وتُربط المحاضرات غير المرتبطة بشعبة بشعبة مرحلة مادتها.
  * @returns {{ops: object[], notes: string[]}}
@@ -189,23 +189,28 @@ export function migrationPlan(data, uid) {
   for (const extra of EXTRA_COLLEGES) {
     const same = colleges.filter((c) => normName(c.name) === normName(extra.name));
     let target = same.find((c) => c.own !== false);
-    if (!target && same.length) {
+    if (!target && !same.length) {
+      ops.push(...collegeStructureOps(uid, extra).ops);
+      continue;
+    }
+    if (!target) {
       target = same[0];
       ops.push({ op: 'update', col: 'colleges', id: target.id, data: { own: true, order: extra.order, short: target.short || extra.short } });
       notes.push(`تحويل «${target.name}» إلى كلية مُدارة`);
-      if (!depts.some((d) => d.collegeId === target.id)) {
-        const deptId = put('departments', { name: extra.short, short: extra.short, collegeId: target.id, general: true });
-        depts.push({ id: deptId, collegeId: target.id });
-        for (let level = 1; level <= extra.stages; level++) {
-          const stageId = put('stages', { deptId, level, name: `المرحلة ${ORDINAL[level] || level}` });
-          stages.push({ id: stageId, deptId, level });
-          const gid = put('groups', { deptId, stageId, shift: 'morning', name: 'صباحي', students: 0 });
-          groups.push({ id: gid, deptId, stageId });
-        }
+    } else if ((target.order ?? 99) >= 99) {
+      ops.push({ op: 'update', col: 'colleges', id: target.id, data: { order: extra.order, short: target.short || extra.short } });
+    }
+    // الإصدار 4: كلية مُدارة بلا أقسام لا يمكن إضافة أساتذة أو جداول لها، فيُنشأ «قسم عام» بمراحله وشعبه
+    if (!depts.some((d) => d.collegeId === target.id)) {
+      const deptId = put('departments', { name: extra.short, short: extra.short, collegeId: target.id, general: true });
+      depts.push({ id: deptId, collegeId: target.id });
+      for (let level = 1; level <= extra.stages; level++) {
+        const stageId = put('stages', { deptId, level, name: `المرحلة ${ORDINAL[level] || level}` });
+        stages.push({ id: stageId, deptId, level });
+        const gid = put('groups', { deptId, stageId, shift: 'morning', name: 'صباحي', students: 0 });
+        groups.push({ id: gid, deptId, stageId });
       }
-    } else if (!target) {
-      ops.push(...collegeStructureOps(uid, extra).ops);
-      continue;
+      notes.push(`إنشاء المراحل والشعب لـ«${target.name}»`);
     }
     for (const dup of same.filter((c) => c !== target)) {
       for (const r of (data.rooms || []).filter((x) => x.collegeId === dup.id)) ops.push({ op: 'update', col: 'rooms', id: r.id, data: { collegeId: target.id } });

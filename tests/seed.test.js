@@ -87,3 +87,29 @@ test('fresh seed gives every stage at least one group', () => {
   const without = data.stages.filter((st) => !data.groups.some((g) => g.stageId === st.id));
   assert.equal(without.length, 0);
 });
+
+test('v4 migration: managed Pharmacy/Dentistry without departments get a general department, stages and groups', () => {
+  const v3 = {
+    settings: [{ id: 'app', schemaVersion: 3 }],
+    colleges: [
+      { id: 'hmt', name: COLLEGE_NAME, own: true, order: 1 },
+      { id: 'ph', name: 'كلية الصيدلة', own: true, order: 99 },
+      { id: 'dn', name: 'كلية طب الاسنان', own: true, order: 99 },
+    ],
+    departments: [{ id: 'an', name: 'قسم تقنيات التخدير', collegeId: 'hmt' }],
+    stages: [{ id: 'an1', deptId: 'an', level: 1 }], groups: [{ id: 'g1', deptId: 'an', stageId: 'an1' }],
+  };
+  const ops = migrationOps(v3, ids());
+  for (const cid of ['ph', 'dn']) {
+    const dept = ops.find((o) => o.col === 'departments' && o.data.collegeId === cid);
+    assert.ok(dept?.data.general, cid);
+    const stageIds = ops.filter((o) => o.col === 'stages' && o.data.deptId === dept.id).map((o) => o.id);
+    assert.equal(stageIds.length, 5);
+    assert.equal(ops.filter((o) => o.col === 'groups' && stageIds.includes(o.data.stageId)).length, 5);
+    assert.ok(ops.find((o) => o.col === 'colleges' && o.id === cid).data.order < 99);
+  }
+  assert.ok(!ops.some((o) => o.op === 'delete'));
+  assert.ok(!ops.some((o) => o.col === 'departments' && o.data.collegeId === 'hmt'));
+  // لا تتكرر بعد الترقية
+  assert.equal(migrationOps({ ...v3, settings: [{ id: 'app', schemaVersion: SCHEMA_VERSION }] }, ids()).length, 0);
+});

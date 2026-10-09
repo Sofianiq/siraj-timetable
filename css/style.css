@@ -170,6 +170,11 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible { outline: 2px sol
 .chip-error { background: var(--err-soft); color: var(--err); border-color: transparent; }
 .chip-morning { background: #fff7d6; color: #8a5a00; border-color: transparent; }
 .chip-evening { background: var(--evening-soft); color: var(--evening); border-color: transparent; }
+.chip-shared { background: #e8eefc; color: #2f4fa8; border-color: transparent; font-size: .75rem; padding: .05rem .45rem; }
+:root[data-theme="dark"] .chip-shared { background: #24345e; color: #c7d4ff; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .chip-shared { background: #24345e; color: #c7d4ff; } }
+.dup-list { display: flex; flex-wrap: wrap; gap: .4rem .9rem; margin-top: .5rem; }
+.dup-item { display: inline-flex; align-items: center; gap: .4rem; font-weight: 600; }
 .summary { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-bottom: .75rem; }
 
 .dropdown { position: relative; }

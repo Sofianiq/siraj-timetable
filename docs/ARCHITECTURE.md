@@ -67,7 +67,7 @@ tests/                     اختبارات آلية
 | `departments` | `name`، `short`، `collegeId`، و`general` (قسم عام يمثل كلية لا تقسم طلبتها إلى أقسام، مثل الصيدلة) |
 | `stages` | `deptId`، `level` (1–6)، `name` |
 | `groups` (الشعب) | `deptId`، `stageId`، `name`، `shift` (`morning`/`evening`)، `students` |
-| `teachers` | `name`، `title`، `deptId`، و`availability` بالشكل `{رقم اليوم: [[من, إلى], ...]}` بالدقائق |
+| `teachers` | `name`، `title`، `deptId` (القسم الأساسي، ومنه الكلية الأساسية)، `sharedColleges` (الكليات الأخرى التي يدرّس فيها)، و`availability` بالشكل `{رقم اليوم: [[من, إلى], ...]}` بالدقائق |
 | `rooms` | `name`، `type` (`hall`/`lab`/`other`)، `labKind`، `capacity`، `collegeId`، `deptId`، `active` |
 | `subjects` | `deptId`، `stageLevel`، `semester`، `name`، `theoryHours`، `practicalHours`، `labType`، `theoryTeacherId`، `practicalTeacherId`، `combineTheory` |
 | `sessions` (المحاضرات) | `term` (مثل `2025-2026/2`)، `deptId`، `subjectId`، `kind` (`theory`/`practical`/`external`)، `groupIds[]`، `teacherId`، `roomId`، `day` (0=السبت … 5=الخميس)، `start`، `end` (بالدقائق منذ منتصف الليل)، `locked`، `auto`، `updatedBy`، `updatedAt` |
@@ -81,6 +81,7 @@ tests/                     اختبارات آلية
 - اختيار الكلية في الشريط العلوي يُحفظ في متصفح المستخدم (`localStorage`) ويُطبَّق على كل الصفحات.
 - **ترقية البيانات:** عند أول دخول لمدير النظام بعد التحديث تُرقّى البيانات القديمة مرة واحدة، ثم تُرفع `schemaVersion` حتى لا تتكرر العملية (`migrationPlan` في `js/seed/radiology.js`):
   - **الإصدار 2:** تُضاف كليتا الصيدلة وطب الأسنان.
+  - **الإصدار 4:** كلية الصيدلة أو طب الأسنان المُدارة بلا أقسام يُنشأ لها «قسم عام» بمراحله وشعبه.
   - **الإصدار 3:** إن كانت الكلية مسجّلة سابقاً كـ«جهة خارجية» بالاسم نفسه تُحوَّل إلى كلية مُدارة، وتُدمج النسخ المكررة (مثل «الاسنان» و«الأسنان»). كذلك تُنشأ شعبة «صباحي» لكل مرحلة ليس لها شعب، وتُربط كل محاضرة بلا شعبة بشعبة مرحلة مادتها إن كانت للمرحلة شعبة واحدة.
 - **المحاضرات بلا شعبة:** المحرر يشترط اختيار شعبة. ما بقي من بيانات قديمة بلا شعبة يظهر ويُطبع في جدول خاص لكل مرحلة (نوع العرض الداخلي `loose`، ومعرّفه «القسم|المرحلة»)، حتى لا يختفي من التصدير.
 | `users` | `email`، `name`، `role` (`admin`/`dept`/`viewer`)، `deptId` |

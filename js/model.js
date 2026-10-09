@@ -106,6 +106,17 @@ export function groupsSorted(deptId, { collegeId = '' } = {}) {
 }
 
 export function teacherName(id) { return byId('teachers', id)?.name || ''; }
+
+/**
+ * كادر الكليات: لكل أستاذ كلية أساسية (كلية قسمه)، ويمكن أن يدرّس أيضاً في كليات أخرى (sharedColleges).
+ * الأستاذ المشترك سجل واحد، لذلك يمنع النظام تعارض أوقاته بين الكليات كلها.
+ */
+export const teacherCollege = (t) => collegeOfDept(t?.deptId) || '';
+export const teacherColleges = (t) => [...new Set([teacherCollege(t), ...(t?.sharedColleges || [])].filter(Boolean))];
+/** هل الأستاذ ضمن كادر الكلية (أساسي أو مشترك)؟ */
+export const teachesIn = (t, collegeId) => !collegeId || teacherColleges(t).includes(collegeId);
+/** هل الأستاذ مشترك في الكلية من كلية أخرى؟ */
+export const sharedInto = (t, collegeId) => !!collegeId && teacherCollege(t) !== collegeId && (t?.sharedColleges || []).includes(collegeId);
 export function roomName(id) { return byId('rooms', id)?.name || ''; }
 export function subjectName(s) {
   if (s.kind === 'external') return s.title || 'حجز خارجي';

@@ -10,7 +10,7 @@ import { esc, el, $, $$, toast, confirmDialog, download, modal } from '../ui.js'
 import { DAY_NAMES, SEMESTERS, toHHMM, toMinutes, formatRange } from '../timeutil.js';
 import {
   ctx, termSessions, deptName, subjectName, termLabel, currentTerm, currentCollegeId, setCurrentCollege,
-  managedColleges, deptsOfCollege, deptOptionsHTML, collegeName, collegeShort,
+  managedColleges, deptsOfCollege, deptOptionsHTML, collegeName, collegeShort, teachesIn, sharedInto,
 } from '../model.js';
 import { openEditor } from './schedule.js';
 import { seedOps } from '../seed/radiology.js';
@@ -57,7 +57,11 @@ export function renderDashboard(container) {
     <div class="stats">
       ${stat('🏢', depts.filter((d) => !d.general).length, 'قسم', '#/departments')}
       ${stat('🎓', store.data.groups.filter((g) => inCollege(g.deptId)).length, 'شعبة / مجموعة', '#/stages')}
-      ${stat('👨‍🏫', store.data.teachers.length, 'أستاذ', '#/teachers', '(مشترك)')}
+      ${(() => {
+        const staff = store.data.teachers.filter((t) => teachesIn(t, cur));
+        const shared = staff.filter((t) => sharedInto(t, cur)).length;
+        return stat('👨‍🏫', staff.length, cur ? 'أستاذ في الكادر' : 'أستاذ', '#/teachers', shared ? `(منهم ${shared} مشترك)` : '');
+      })()}
       ${stat('🚪', store.data.rooms.length, 'قاعة ومختبر', '#/rooms', '(مشترك)')}
       ${stat('📘', store.data.subjects.filter((x) => inCollege(x.deptId) && Number(x.semester || 1) === sem).length, 'مادة هذا الفصل', '#/subjects')}
       ${stat('🗓', sessions.length, 'محاضرة هذا الفصل', '#/schedule')}
