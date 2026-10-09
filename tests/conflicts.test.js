@@ -55,3 +55,16 @@ test('checkAll reports both sides of a clash', () => {
   const m = checkAll(all, ctx);
   assert.ok(m.has('a') && m.has('b'));
 });
+
+test('different lab groups of one section do not clash; a group clashes with a whole-section lecture', async () => {
+  const { checkSession, buildCtx } = await import('../js/conflicts.js');
+  const ctx = buildCtx({ groups: [{ id: 'g', name: 'صباحي', students: 80, subgroups: ['A', 'B', 'C', 'D'] }], rooms: [{ id: 'lab', name: 'Lab', type: 'lab', capacity: 25 }] });
+  const base = { day: 2, start: 510, end: 630, groupIds: ['g'], term: 't', kind: 'practical' };
+  const a = { ...base, id: 'a', subgroups: ['A'] };
+  assert.equal(checkSession({ ...base, id: 'b', subgroups: ['B'] }, [a], ctx).filter((i) => i.type === 'group').length, 0);
+  assert.equal(checkSession({ ...base, id: 'c', subgroups: ['A'] }, [a], ctx).filter((i) => i.type === 'group').length, 1);
+  assert.equal(checkSession({ ...base, id: 'w', subgroups: [] , kind: 'theory' }, [a], ctx).filter((i) => i.type === 'group').length, 1);
+  // سعة المختبر تقارن بطلبة المجموعة (80 / 4 = 20) وليس الشعبة كاملة
+  assert.equal(checkSession({ ...a, roomId: 'lab' }, [], ctx).filter((i) => i.type === 'capacity').length, 0);
+  assert.equal(checkSession({ ...a, subgroups: [], roomId: 'lab' }, [], ctx).filter((i) => i.type === 'capacity').length, 1);
+});

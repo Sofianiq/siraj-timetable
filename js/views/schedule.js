@@ -13,6 +13,7 @@ import {
   collegeName, collegeShort, teacherCollege, teachesIn, sharedInto,
 } from '../model.js';
 import { exportPDF, exportExcel, printTables, savePDF, previewTables, setPrintProvider } from '../export.js';
+import { subgroupColor } from '../subgroups.js';
 
 const state = {
   type: 'group', id: '', deptId: '',
@@ -299,7 +300,14 @@ function coverage(groupId, sessions) {
   const subjects = store.data.subjects.filter((s) => s.deptId === g?.deptId && Number(s.stageLevel) === Number(stage?.level) && Number(s.semester || sem) === sem);
   if (!subjects.length) return el('<span></span>');
   const rows = subjects.map((s) => {
-    const done = (kind) => sessions.filter((x) => x.subjectId === s.id && x.kind === kind).reduce((n, x) => n + (x.end - x.start) / 60, 0);
+    // في الشعبة المقسّمة إلى مجاميع: الساعات المنجزة = ساعات المجموعة الأقل تغطية
+    const hours = (list) => list.reduce((n, x) => n + (x.end - x.start) / 60, 0);
+    const done = (kind) => {
+      const list = sessions.filter((x) => x.subjectId === s.id && x.kind === kind);
+      const subs = g?.subgroups || [];
+      if (!subs.length || !list.some((x) => x.subgroups?.length)) return hours(list);
+      return Math.min(...subs.map((sg) => hours(list.filter((x) => !x.subgroups?.length || x.subgroups.includes(sg)))));
+    };
     const th = done('theory'), pr = done('practical');
     const ok = th >= (s.theoryHours || 0) && pr >= (s.practicalHours || 0);
     return `<tr class="${ok ? '' : 'miss'}"><td>${esc(s.name)}</td><td>${th}/${s.theoryHours || 0}</td><td>${pr}/${s.practicalHours || 0}</td><td>${ok ? '✓' : '✗'}</td></tr>`;
@@ -336,6 +344,8 @@ export async function openEditor(session, defaults = {}) {
       <div class="field full" data-for="external"><label>الجهة الحاجزة</label><input name="bookedBy" value="${esc(s.bookedBy || '')}" placeholder="مثال: كلية الصيدلة — قسم ..."></div>
       <div class="field full" data-for="normal"><label>الشعب / المجموعات <span class="req">*</span></label><div class="checklist" id="groupsBox"></div>
         <small class="muted">اختر أكثر من شعبة لمحاضرة مشتركة (مثلاً النظري لكل شعب المرحلة).</small></div>
+      <div class="field full" id="subField" hidden><label>مجموعة العملي</label><div class="checklist inline" id="subBox"></div>
+        <small class="muted">اختر المجموعة (أو المجاميع) التي تحضر هذا العملي، فتأخذ بقية المجاميع مواد أخرى في الوقت نفسه. اتركها كلها بدون تحديد إذا كانت المحاضرة للشعبة كاملة (مثل النظري).</small></div>
       <div class="field" data-for="normal"><label>الأستاذ</label><select name="teacherId"></select></div>
       <div class="field"><label>القاعة / المختبر</label><select name="roomId"></select></div>
       <div class="field"><label>اليوم</label><select name="day">${days.map((d) => `<option value="${d}" ${d === s.day ? 'selected' : ''}>${DAY_NAMES[d]}</option>`).join('')}</select></div>
@@ -353,6 +363,20 @@ export async function openEditor(session, defaults = {}) {
     const ext = f('kind').value === 'external';
     $$('[data-for="normal"]', body).forEach((x) => { x.hidden = ext; });
     $$('[data-for="external"]', body).forEach((x) => { x.hidden = !ext; });
+    refreshSubs();
+  }
+  /** مجاميع العملي: تظهر عند اختيار شعبة واحدة مقسّمة إلى مجاميع */
+  const currentSubs = () => ($('#subField', body).hidden ? [] : $$('#subBox input:checked', body).map((i) => i.value));
+  function refreshSubs() {
+    const gids = currentGroups();
+    const g = gids.length === 1 ? byId('groups', gids[0]) : null;
+    const subs = f('kind').value !== 'external' ? g?.subgroups || [] : [];
+    const box = $('#subField', body);
+    const keep = new Set(box.dataset.ready ? currentSubs() : s.subgroups || []);
+    if (subs.length) box.dataset.ready = '1';
+    box.hidden = !subs.length;
+    $('#subBox', body).innerHTML = subs.map((x) => `<label class="chk"><input type="checkbox" value="${esc(x)}" ${keep.has(x) ? 'checked' : ''}>
+      <span class="sg-chip" style="background:${subgroupColor(g, x)[0]}">${esc(x)}</span> مجموعة ${esc(x)}</label>`).join('');
   }
   /** مواد القسم المختار فقط، للفصل الحالي، ولمرحلة الشعب المختارة (ما لم يُطلب عرض الكل) */
   function refreshSubjects() {
@@ -434,7 +458,7 @@ export async function openEditor(session, defaults = {}) {
       roomId: f('roomId').value || null, locked: f('locked').checked, note: f('note').value.trim(), term: s.term || currentTerm(),
     };
     if (kind === 'external') Object.assign(v, { title: f('title').value.trim(), bookedBy: f('bookedBy').value.trim(), groupIds: [], teacherId: null, subjectId: null, deptId: null });
-    else Object.assign(v, { deptId: f('deptId').value, subjectId: f('subjectId').value || null, groupIds: currentGroups(), teacherId: f('teacherId').value || null });
+    else Object.assign(v, { deptId: f('deptId').value, subjectId: f('subjectId').value || null, groupIds: currentGroups(), subgroups: currentSubs(), teacherId: f('teacherId').value || null });
     return v;
   }
   function refreshIssues() {
@@ -447,14 +471,14 @@ export async function openEditor(session, defaults = {}) {
     return issues;
   }
 
-  refreshKind(); refreshGroups();
+  refreshKind(); refreshGroups(); refreshSubs();
   // محاضرة قديمة بلا شعبة: تُقترح شعب مرحلة مادتها
   if (!isNew && !readOnly && s.kind !== 'external' && !(s.groupIds || []).length) suggestGroups(byId('subjects', s.subjectId));
   refreshSubjects(); refreshTeachers(); refreshRooms();
   f('kind').onchange = () => { refreshKind(); refreshIssues(); };
-  f('deptId').onchange = () => { refreshGroups(); refreshSubjects(); refreshTeachers(); refreshRooms(); refreshIssues(); };
+  f('deptId').onchange = () => { refreshGroups(); refreshSubs(); refreshSubjects(); refreshTeachers(); refreshRooms(); refreshIssues(); };
   $('#allSubjects', body).onchange = () => refreshSubjects();
-  $('#groupsBox', body).addEventListener('change', () => refreshSubjects());
+  $('#groupsBox', body).addEventListener('change', () => { refreshSubjects(); refreshSubs(); });
   f('subjectId').onchange = () => {
     const sub = byId('subjects', f('subjectId').value);
     if (sub) {
@@ -462,6 +486,7 @@ export async function openEditor(session, defaults = {}) {
       const tid = f('kind').value === 'practical' ? (sub.practicalTeacherId || sub.theoryTeacherId) : (sub.theoryTeacherId || sub.practicalTeacherId);
       if (tid && !f('teacherId').value) f('teacherId').value = tid;
       suggestGroups(sub);
+      refreshSubs();
     }
     refreshIssues();
   };

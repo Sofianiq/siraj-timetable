@@ -121,7 +121,14 @@ function run(page) {
 function showResult(page, res) {
   const box = $('#result', page);
   const perGroup = new Map();
-  for (const s of res.sessions) for (const g of s.groupIds) perGroup.set(g, (perGroup.get(g) || 0) + (s.end - s.start) / 60);
+  // ساعات الطالب الواحد: محاضرة المجموعة تُحتسب بنسبة مجموعتها من مجاميع الشعبة
+  for (const s of res.sessions) {
+    for (const g of s.groupIds) {
+      const n = (byId('groups', g)?.subgroups || []).length;
+      const share = s.subgroups?.length && n ? s.subgroups.length / n : 1;
+      perGroup.set(g, (perGroup.get(g) || 0) + ((s.end - s.start) / 60) * share);
+    }
+  }
   box.innerHTML = '';
   const card = el(`<div class="card">
     <h3>نتيجة التوليد</h3>
@@ -138,7 +145,7 @@ function showResult(page, res) {
         <td>${esc(u.groupIds.map((g) => groupLabel(byId('groups', g), { withDept: res.deptId === ALL })).join(' + '))}</td><td>${u.duration / 60} س</td><td>${esc(u.reason)}</td></tr>`).join('')}
       </tbody></table></div><p class="muted">اقتراحات: أضف قاعة/مختبراً، وسّع أوقات توفر الأستاذ، أو قلل مدة الكتلة، ثم أعد التوليد. ويمكنك أيضاً إضافة هذه المحاضرات يدوياً.</p>` : ''}
     <h4>الساعات المجدولة لكل شعبة</h4>
-    <div class="summary">${[...perGroup].map(([g, h]) => `<span class="chip">${esc(groupLabel(byId('groups', g), { withDept: res.deptId === ALL }))}: ${h} س</span>`).join('') || '<span class="muted">—</span>'}</div>
+    <div class="summary">${[...perGroup].map(([g, h]) => `<span class="chip">${esc(groupLabel(byId('groups', g), { withDept: res.deptId === ALL }))}: ${Math.round(h * 10) / 10} س</span>`).join('') || '<span class="muted">—</span>'}</div>
     <div class="toolbar"><button class="btn btn-primary" id="commit">💾 اعتماد وحفظ الجدول</button><button class="btn" id="discard">تجاهل</button></div>
   </div>`);
   box.appendChild(card);

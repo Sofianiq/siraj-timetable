@@ -7,6 +7,7 @@
  *   warning (تنبيه فقط):  تجاوز سعة القاعة، خارج أوقات توفر الأستاذ، خارج وقت الدوام، نوع القاعة غير مناسب.
  */
 import { overlaps, DAY_NAMES, formatRange } from './timeutil.js';
+import { subsOf, subsOverlap, subgroupShare } from './subgroups.js';
 
 /**
  * @typedef {Object} Ctx
@@ -39,9 +40,9 @@ function describe(o, ctx) {
   return `«${name}» (${DAY_NAMES[o.day]} ${formatRange(o.start, o.end)})`;
 }
 
-/** مجموع طلبة الشعب المرتبطة بالمحاضرة */
+/** مجموع طلبة الشعب المرتبطة بالمحاضرة (أو حصة المجاميع المختارة من الشعبة) */
 export function studentCount(session, ctx) {
-  return (session.groupIds || []).reduce((sum, gid) => sum + (Number(ctx.groups.get(gid)?.students) || 0), 0);
+  return (session.groupIds || []).reduce((sum, gid) => sum + subgroupShare(ctx.groups.get(gid), session), 0);
 }
 
 /** هل المجال [start,end) ضمن أوقات توفر الأستاذ في ذلك اليوم؟ (عدم تحديد التوفر = متاح دائماً) */
@@ -86,9 +87,11 @@ export function checkSession(s, all, ctx) {
       issues.push({ level: 'error', type: 'room', otherId: o.id,
         message: `${r?.name || 'القاعة'} محجوزة في الوقت نفسه: ${describe(o, ctx)}${o.kind === 'external' ? ' — حجز لجهة أخرى' : ''}` });
     }
-    const shared = (o.groupIds || []).filter((g) => sGroups.has(g));
+    // مجاميع العملي المختلفة من الشعبة نفسها (A و B مثلاً) لا تتعارض
+    const shared = (o.groupIds || []).filter((g) => sGroups.has(g) && subsOverlap(s, o));
     if (shared.length) {
-      const names = shared.map((g) => ctx.groups.get(g)?.name || '').join('، ');
+      const subs = subsOf(s).filter((x) => !subsOf(o).length || subsOf(o).includes(x));
+      const names = shared.map((g) => ctx.groups.get(g)?.name || '').join('، ') + (subs.length ? ` — المجموعة ${subs.join(' + ')}` : '');
       issues.push({ level: 'error', type: 'group', otherId: o.id,
         message: `الشعبة (${names}) لديها محاضرة أخرى في الوقت نفسه: ${describe(o, ctx)}` });
     }

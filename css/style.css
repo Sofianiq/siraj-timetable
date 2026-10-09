@@ -387,6 +387,23 @@ td.sc.wide .cd-name { font-size: calc(17px * var(--fs)); }
 .sh-foot .issued { font-size: 10.5px; color: #8b959b; }
 .sh-foot .sign { width: 62mm; text-align: center; color: var(--ink); font-weight: 700; font-size: 14.5px; }
 .sh-foot .sign .line { border-top: 1.5px solid var(--a); margin-bottom: 1.4mm; }
+/* مجاميع العملي: خانة مكدّسة، لكل مجموعة سطر بلونها */
+.sh-grid td.sc.stk { padding: .6mm 1.2mm; }
+.stk .cd-top { gap: 1.6mm; }
+.stk .stk-n { font-size: calc(10.5px * var(--fs)); color: #6f7a80; }
+.sg-rows { display: flex; flex-direction: column; gap: .45mm; margin-top: .3mm; }
+.sg-row { display: flex; align-items: center; gap: 1.3mm; background: var(--sgb); border-right: 3px solid var(--sg); border-radius: 2px; padding: .35mm 1.2mm; text-align: right; }
+.sg-tag { display: inline-block; background: var(--sg); color: #fff; font-weight: 700; min-width: 5.2mm; padding: 0 1mm; border-radius: 2px; text-align: center; font-size: calc(11.5px * var(--fs) * var(--sf, 1)); line-height: 1.35; }
+.cd-top .sg-tag { font-size: calc(11.5px * var(--fs)); }
+.sg-body { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 1.6mm; flex: 1; min-width: 0; }
+.sg-name { font-weight: 700; color: #1b262c; font-size: calc(12.5px * var(--fs) * var(--sf, 1)); line-height: 1.2; }
+.sg-meta, .sg-time { color: var(--ink); font-size: calc(10.5px * var(--fs) * var(--sf, 1)); }
+.sg-time { color: var(--sg); font-weight: 700; }
+td.sc.stk.narrow .sg-meta { display: block; width: 100%; }
+/* شارة المجموعة في الجدول على الشاشة وصفحة المراحل */
+.sg-chip { display: inline-block; color: #fff; font-weight: 700; font-size: .7rem; line-height: 1.5; min-width: 1.3rem; padding: 0 .3rem; border-radius: 4px; text-align: center; margin-inline-end: .25rem; }
+.sg-tr td { padding-top: 0 !important; border-top: 0 !important; }
+.sg-tr .sg-chip { margin-inline-start: .2rem; }
 .theme-swatch { display: inline-flex; border-radius: 4px; overflow: hidden; vertical-align: middle; border: 1px solid var(--border); }
 .theme-swatch i { width: 12px; height: 16px; display: block; }
 .pdf-render { position: absolute !important; top: 0; right: auto !important; left: 0; z-index: 998; }

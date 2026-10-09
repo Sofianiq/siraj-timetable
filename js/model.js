@@ -4,6 +4,7 @@
 import { store, byId, settings, collegeOfDept, myCollegeId } from './store.js';
 import { buildCtx } from './conflicts.js';
 import { STAGE_NAMES, SHIFTS, SEMESTERS } from './timeutil.js';
+import { subgroupLabel } from './subgroups.js';
 
 export function currentTerm() {
   const s = settings();
@@ -231,10 +232,11 @@ export function viewHeader(type, id) {
 }
 
 /** وصف مختصر لمحاضرة يظهر داخل الخانة */
-export function sessionLines(s, viewType) {
+export function sessionLines(s, viewType, { withSub = true } = {}) {
   const lines = [];
   const kind = s.kind === 'practical' ? 'عملي' : s.kind === 'external' ? 'حجز' : 'نظري';
-  lines.push(`${subjectName(s)} (${kind})`);
+  const sub = withSub ? subgroupLabel(s) : '';
+  lines.push(`${subjectName(s)} (${kind})${sub ? ` — ${sub}` : ''}`);
   if (viewType !== 'teacher' && s.teacherId) lines.push(teacherName(s.teacherId));
   if (viewType !== 'room' && s.roomId) lines.push(roomName(s.roomId));
   if (viewType !== 'group' && s.groupIds?.length) {

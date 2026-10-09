@@ -4,7 +4,8 @@
  * الخوارزمية (Heuristic + Repair + Random Restarts):
  *  1. تحويل المواد إلى «طلبات» (Demands): كل طلب كتلة زمنية لمادة/نوع (نظري أو عملي)/مجموعة شعب/أستاذ.
  *     - النظري يُدرَّس افتراضياً لكل شعب المرحلة في نفس نوع الدراسة معاً (يمكن تعطيله لكل مادة).
- *     - العملي يُدرَّس لكل شعبة على حدة.
+ *     - العملي يُدرَّس لكل شعبة على حدة، وإن كانت الشعبة مقسّمة إلى مجاميع عملي (A, B, C…) فلكل مجموعة على حدة،
+ *       فتأخذ المجاميع مواد عملية مختلفة في الوقت نفسه وفي مختبرات مختلفة.
  *     - الساعات تُقسَّم إلى كتل لا تتجاوز الحد الأقصى (مثلاً 3 ساعات نظري → 2 + 1).
  *  2. ترتيب الطلبات من الأصعب للأسهل (الأقل خيارات متاحة أولاً، ثم الأطول، ثم الأكثر طلبة).
  *  3. لكل طلب: توليد كل الخيارات (يوم × وقت بداية × قاعة) التي تحقق القيود الصارمة:
@@ -18,6 +19,22 @@
  */
 import { overlaps } from './timeutil.js';
 import { teacherAvailable } from './conflicts.js';
+import { subsOf } from './subgroups.js';
+
+/**
+ * مفاتيح إشغال الطلبة: المحاضرة للشعبة كاملة تشغل الشعبة وكل مجاميعها،
+ * ومحاضرة المجموعة تشغل مجموعتها فقط؛ فلا تتعارض مجموعتان مختلفتان، وتتعارض المجموعة مع محاضرة الشعبة كاملة.
+ */
+export function studentKeys(groupIds, subgroups, groupsMap) {
+  const keys = [];
+  for (const gid of groupIds || []) {
+    const all = groupsMap.get(gid)?.subgroups || [];
+    const subs = (groupIds.length === 1 ? subgroups || [] : []).filter((x) => all.includes(x));
+    if (subs.length) keys.push(...subs.map((x) => `${gid}#${x}`));
+    else keys.push(gid, ...all.map((x) => `${gid}#${x}`));
+  }
+  return keys;
+}
 
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -84,7 +101,8 @@ export function buildDemands({ subjects, stages, groups, settings, keptSessions,
   const covered = new Map();
   for (const s of keptSessions) {
     if (!s.subjectId) continue;
-    const k = `${s.subjectId}|${s.kind}|${[...(s.groupIds || [])].sort().join(',')}`;
+    const subs = subsOf(s);
+    const k = `${s.subjectId}|${s.kind}|${[...(s.groupIds || [])].sort().join(',')}${subs.length ? `#${[...subs].sort().join('+')}` : ''}`;
     covered.set(k, (covered.get(k) || 0) + (s.end - s.start) / 60);
   }
   const consume = (k, blocks) => {
@@ -117,12 +135,13 @@ export function buildDemands({ subjects, stages, groups, settings, keptSessions,
 
     for (const [shift, gs] of byShift) {
       const win = shifts[shift] || shifts.morning;
-      const mk = (kind, groupList, dur, teacherId) => ({
+      const mk = (kind, groupList, dur, teacherId, sub = null) => ({
         subjectId: subj.id, deptId: subj.deptId, kind, shift, win,
-        groupIds: groupList.map((g) => g.id),
-        needed: groupList.reduce((n, g) => n + (Number(g.students) || 0), 0),
+        groupIds: groupList.map((g) => g.id), subgroups: sub ? [sub] : [],
+        needed: sub ? Math.ceil((Number(groupList[0].students) || 0) / groupList[0].subgroups.length)
+          : groupList.reduce((n, g) => n + (Number(g.students) || 0), 0),
         duration: Math.round(dur * 60), teacherId: teacherId || null,
-        labType: subj.labType || '', subjectName: subj.name,
+        labType: subj.labType || '', subjectName: subj.name + (sub ? ` — مجموعة ${sub}` : ''),
       });
 
 
@@ -135,8 +154,11 @@ export function buildDemands({ subjects, stages, groups, settings, keptSessions,
       }
       if (Number(subj.practicalHours) > 0) {
         for (const g of gs) {
-          const key = `${subj.id}|practical|${g.id}`;
-          for (const b of consume(key, splitHours(subj.practicalHours, maxP))) demands.push(mk('practical', [g], b, practicalTeacher));
+          // الشعبة المقسّمة إلى مجاميع: طلب عملي مستقل لكل مجموعة
+          for (const sub of g.subgroups?.length ? g.subgroups : [null]) {
+            const key = `${subj.id}|practical|${g.id}${sub ? `#${sub}` : ''}`;
+            for (const b of consume(key, splitHours(subj.practicalHours, maxP))) demands.push(mk('practical', [g], b, practicalTeacher, sub));
+          }
         }
       }
     }
@@ -168,7 +190,12 @@ function roomOptions(d, rooms, deptCollege) {
 }
 
 function runOnce(demands, ctx, rng, options) {
-  const { days, step, fixedOcc, teachersMap, roomsByDemand } = ctx;
+  const { days, step, fixedOcc, teachersMap, roomsByDemand, groupsMap } = ctx;
+  const keysOf = new Map(demands.map((d) => [d.idx, studentKeys(d.groupIds, d.subgroups, groupsMap)]));
+  // مفاتيح حساب الحمل اليومي والفراغات: للمجموعة مفتاحها، وللشعبة المقسّمة مفتاح أول مجموعة (يشمل محاضراتها كاملة)
+  const loadKeysOf = new Map(demands.map((d) => [d.idx, d.subgroups?.length ? keysOf.get(d.idx)
+    : d.groupIds.map((g) => { const subs = groupsMap.get(g)?.subgroups || []; return subs.length ? `${g}#${subs[0]}` : g; })]));
+  const sdKeyOf = (d) => `${d.subjectId}|${d.groupIds.join(',')}#${(d.subgroups || []).join('+')}`;
   const occ = new Occupancy();
   // نسخ الإشغال الثابت
   for (const [k, list] of fixedOcc.map) occ.map.set(k, list.map((x) => ({ ...x })));
@@ -188,7 +215,7 @@ function runOnce(demands, ctx, rng, options) {
         let hardFixed = false;
         const collect = (tags) => { for (const t of tags) { if (t === 'fixed') hardFixed = true; else blockers.add(t); } };
         collect(occ.blockers('t', d.teacherId, day, s, e));
-        for (const g of d.groupIds) collect(occ.blockers('g', g, day, s, e));
+        for (const g of keysOf.get(d.idx)) collect(occ.blockers('g', g, day, s, e));
         if (hardFixed) continue;
         if (!ignoreRunPlaced && blockers.size) continue;
         for (const ro of roomsByDemand.get(d.idx)) {
@@ -205,9 +232,8 @@ function runOnce(demands, ctx, rng, options) {
 
   const cost = (d, c) => {
     let k = c.roomPen;
-    const sdKey = `${d.subjectId}|${d.groupIds.join(',')}`;
-    if (subjDays.get(sdKey)?.has(c.day)) k += 50;
-    for (const g of d.groupIds) {
+    if (subjDays.get(sdKeyOf(d))?.has(c.day)) k += 50;
+    for (const g of loadKeysOf.get(d.idx)) {
       const load = groupLoad(g, c.day);
       const after = (load + d.duration) / 60;
       if (after > (options.maxDailyHours || 6)) k += 40 * (after - (options.maxDailyHours || 6));
@@ -231,8 +257,8 @@ function runOnce(demands, ctx, rng, options) {
     placed.set(d.idx, c);
     occ.add('t', d.teacherId, c.day, c.start, c.end, d.idx);
     occ.add('r', c.roomId, c.day, c.start, c.end, d.idx);
-    for (const g of d.groupIds) occ.add('g', g, c.day, c.start, c.end, d.idx);
-    const sdKey = `${d.subjectId}|${d.groupIds.join(',')}`;
+    for (const g of keysOf.get(d.idx)) occ.add('g', g, c.day, c.start, c.end, d.idx);
+    const sdKey = sdKeyOf(d);
     if (!subjDays.has(sdKey)) subjDays.set(sdKey, new Set());
     subjDays.get(sdKey).add(c.day);
   };
@@ -240,11 +266,8 @@ function runOnce(demands, ctx, rng, options) {
     const c = placed.get(d.idx);
     placed.delete(d.idx);
     occ.removeTag(d.idx);
-    const sdKey = `${d.subjectId}|${d.groupIds.join(',')}`;
-    const stillOther = [...placed.entries()].some(([i, pc]) => {
-      const od = demands[i];
-      return od.subjectId === d.subjectId && od.groupIds.join(',') === d.groupIds.join(',') && pc.day === c.day;
-    });
+    const sdKey = sdKeyOf(d);
+    const stillOther = [...placed.entries()].some(([i, pc]) => sdKeyOf(demands[i]) === sdKey && pc.day === c.day);
     if (!stillOther) subjDays.get(sdKey)?.delete(c.day);
   };
   const best = (d, list) => {
@@ -310,15 +333,16 @@ export function generate(p) {
     keptSessions: p.keptInScope || [], options,
   });
 
+  const groupsMap = new Map((p.groups || []).map((g) => [g.id, g]));
   const fixedOcc = new Occupancy();
   for (const s of p.fixedSessions || []) {
     fixedOcc.add('t', s.teacherId, s.day, s.start, s.end, 'fixed');
     fixedOcc.add('r', s.roomId, s.day, s.start, s.end, 'fixed');
-    for (const g of s.groupIds || []) fixedOcc.add('g', g, s.day, s.start, s.end, 'fixed');
+    for (const g of studentKeys(s.groupIds, subsOf(s), groupsMap)) fixedOcc.add('g', g, s.day, s.start, s.end, 'fixed');
   }
   const deptCollege = p.deptCollege || null;
   const roomsByDemand = new Map(demands.map((d) => [d.idx, roomOptions(d, p.rooms, deptCollege)]));
-  const ctx = { days, step, fixedOcc, teachersMap: new Map(p.teachers.map((t) => [t.id, t])), roomsByDemand };
+  const ctx = { days, step, fixedOcc, teachersMap: new Map(p.teachers.map((t) => [t.id, t])), roomsByDemand, groupsMap };
 
   const t0 = Date.now();
   let bestRun = null;
@@ -336,7 +360,7 @@ export function generate(p) {
     for (const [idx, c] of bestRun.placed) {
       const d = demands[idx];
       sessions.push({
-        subjectId: d.subjectId, deptId: d.deptId, kind: d.kind, groupIds: d.groupIds,
+        subjectId: d.subjectId, deptId: d.deptId, kind: d.kind, groupIds: d.groupIds, subgroups: d.subgroups || [],
         teacherId: d.teacherId, roomId: c.roomId, day: c.day, start: c.start, end: c.end,
         auto: true, locked: false,
       });

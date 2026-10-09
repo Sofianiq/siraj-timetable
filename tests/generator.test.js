@@ -67,3 +67,30 @@ test('kept sessions reduce the demanded hours', () => {
   assert.equal(res.sessions.length, 1);
   assert.deepEqual(res.sessions[0].groupIds, ['st1e']);
 });
+
+test('practical lab groups (A–D) run in parallel in different labs while theory takes the whole section', async () => {
+  const { generate } = await import('../js/generator.js');
+  const { checkAll, buildCtx } = await import('../js/conflicts.js');
+  const settings = { days: [1, 2, 3], slotMinutes: 30, shifts: { morning: { start: 510, end: 930 }, evening: { start: 930, end: 1200 } } };
+  const stages = [{ id: 'st2', deptId: 'ph', level: 2 }];
+  const groups = [{ id: 'g', deptId: 'ph', stageId: 'st2', shift: 'morning', students: 80, subgroups: ['A', 'B', 'C', 'D'] }];
+  const names = ['Microbiology', 'Physical Pharmacy', 'Physiology', 'Organic Chemistry'];
+  const teachers = names.map((_, i) => ({ id: `t${i}`, name: `T${i}` })).concat([{ id: 'tt', name: 'Theory' }]);
+  const subjects = names.map((n, i) => ({ id: `s${i}`, deptId: 'ph', stageLevel: 2, semester: 1, name: n, theoryHours: 0, practicalHours: 2, practicalTeacherId: `t${i}` }))
+    .concat([{ id: 'th', deptId: 'ph', stageLevel: 2, semester: 1, name: 'Pharmacology', theoryHours: 2, practicalHours: 0, theoryTeacherId: 'tt' }]);
+  const rooms = [{ id: 'hall', type: 'hall', capacity: 100 }, ...[1, 2, 3, 4].map((i) => ({ id: `lab${i}`, type: 'lab', capacity: 25 }))];
+  const res = generate({ subjects, stages, groups, teachers, rooms, fixedSessions: [], keptInScope: [], settings, options: { restarts: 10, seed: 3 } });
+  assert.equal(res.unplaced.length, 0);
+  const practical = res.sessions.filter((x) => x.kind === 'practical');
+  assert.equal(practical.length, 16); // 4 مجاميع × 4 مواد
+  for (const sub of ['A', 'B', 'C', 'D']) assert.equal(new Set(practical.filter((x) => x.subgroups[0] === sub).map((x) => x.subjectId)).size, 4);
+  // 32 ساعة عملي في 21 ساعة دوام: لا بد أن تعمل المجاميع بالتوازي في مختبرات مختلفة
+  assert.ok(practical.some((a) => practical.some((b) => a !== b && a.day === b.day && a.start < b.end && b.start < a.end && a.roomId !== b.roomId)));
+  const all = res.sessions.map((x, i) => ({ ...x, id: `x${i}`, term: '' }));
+  const issues = checkAll(all, buildCtx({ rooms, groups, teachers, subjects, settings }));
+  const errors = [...issues.values()].flat().filter((i) => i.level === 'error');
+  assert.equal(errors.length, 0);
+  // النظري للشعبة كاملة لا يتداخل مع أي عملي
+  const th = all.find((x) => x.kind === 'theory');
+  assert.ok(!all.some((x) => x.kind === 'practical' && x.start < th.end && th.start < x.end));
+});

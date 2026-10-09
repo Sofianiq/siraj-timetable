@@ -13,6 +13,7 @@ import {
   currentCollegeId, deptsOfCollege, deptOptionsHTML, teacherCollege, teacherColleges, sharedInto,
 } from '../model.js';
 import { normPerson } from '../text.js';
+import { parseSubgroups, subgroupColor } from '../subgroups.js';
 import { collegeStructureOps } from '../seed/radiology.js';
 import { themeOptions, themeSwatch, themeKeyForDept } from '../themes.js';
 
@@ -536,7 +537,7 @@ export function renderStages(container) {
   container.innerHTML = '';
   const page = el(`<div class="page">
     <div class="page-head"><h2>🎓 المراحل الدراسية والشعب</h2></div>
-    <p class="muted">يمكن تقسيم كل مرحلة إلى أكثر من شعبة/مجموعة، ولكل شعبة نوع دراسة (صباحي أو مسائي) وعدد طلبة. مثال: «أ - صباحي»، «ب - صباحي»، «مسائي».</p>
+    <p class="muted">يمكن تقسيم كل مرحلة إلى أكثر من شعبة/مجموعة، ولكل شعبة نوع دراسة (صباحي أو مسائي) وعدد طلبة. مثال: «أ - صباحي»، «ب - صباحي»، «مسائي». وإن كانت الشعبة تُقسَّم في العملي إلى مجاميع (A, B, C, D) تأخذ كل منها مادة مختلفة في الوقت نفسه، اضغط «تعديل» الشعبة واكتب أسماء المجاميع؛ فتظهر كلها مكدّسة في جدول الشعبة.</p>
     <div class="toolbar">
       <select id="dept">${deptOptionsHTML(deptId, { collegeId: cur })}</select>
       <span class="spacer"></span>
@@ -549,7 +550,9 @@ export function renderStages(container) {
           ${canE ? `<div><button class="btn btn-sm" data-edit-stage>تعديل</button><button class="btn btn-sm btn-danger-ghost" data-del-stage>حذف</button></div>` : ''}</div>
         <table class="mini-table"><thead><tr><th>الشعبة</th><th>الدراسة</th><th>الطلبة</th><th></th></tr></thead><tbody>
         ${gs.map((g) => `<tr data-group="${g.id}"><td>${esc(g.name)}</td><td><span class="chip ${g.shift === 'evening' ? 'chip-evening' : 'chip-morning'}">${SHIFTS[g.shift] || ''}</span></td><td>${g.students || 0}</td>
-          <td class="actions">${canE ? '<button class="btn btn-sm" data-edit-group>تعديل</button><button class="btn btn-sm btn-danger-ghost" data-del-group>حذف</button>' : ''}</td></tr>`).join('')
+          <td class="actions">${canE ? '<button class="btn btn-sm" data-edit-group>تعديل</button><button class="btn btn-sm btn-danger-ghost" data-del-group>حذف</button>' : ''}</td></tr>
+          ${(g.subgroups || []).length ? `<tr class="sg-tr" data-group="${g.id}"><td colspan="4"><span class="muted small">مجاميع العملي:</span>
+            ${g.subgroups.map((x) => `<span class="sg-chip" style="background:${subgroupColor(g, x)[0]}">${esc(x)}</span>`).join('')}</td></tr>` : ''}`).join('')
           || '<tr><td colspan="4" class="muted">لا توجد شعب</td></tr>'}
         </tbody></table>
         ${canE ? '<button class="btn btn-sm" data-add-group>＋ شعبة / مجموعة</button>' : ''}
@@ -569,7 +572,17 @@ export function renderStages(container) {
     { key: 'name', label: 'اسم الشعبة/المجموعة', required: true, placeholder: 'مثال: أ أو صباحي' },
     { key: 'shift', label: 'نوع الدراسة', type: 'select', options: Object.entries(SHIFTS).map(([value, label]) => ({ value, label })), required: true, default: 'morning' },
     { key: 'students', label: 'عدد الطلبة', type: 'number', min: 0, default: 0 },
+    { key: 'subgroupsText', label: 'مجاميع العملي (اختياري)', full: true, placeholder: 'مثال: A, B, C, D',
+      help: 'إن كانت الشعبة تُقسَّم في العملي إلى مجاميع تأخذ كل منها مادة مختلفة في الوقت نفسه، اكتب أسماءها مفصولة بفواصل. النظري يبقى للشعبة كاملة، وتظهر المجاميع معاً في جدول الشعبة.' },
   ];
+  /** حفظ الشعبة: تحويل نص المجاميع إلى قائمة، وإزالة المجاميع المحذوفة من محاضراتها */
+  const groupData = (v) => {
+    const { subgroupsText, ...rest } = v;
+    return { ...rest, students: Number(v.students) || 0, subgroups: parseSubgroups(subgroupsText) };
+  };
+  const cleanSessions = (gid, subs) => store.data.sessions
+    .filter((x) => (x.groupIds || []).includes(gid) && (x.subgroups || []).some((y) => !subs.includes(y)))
+    .map((x) => ({ op: 'update', col: 'sessions', id: x.id, data: { subgroups: x.subgroups.filter((y) => subs.includes(y)) } }));
   const edit = async (title, fields, values, save) => {
     const form = buildForm(fields, values);
     await modal({ title, body: form, buttons: [{ label: 'حفظ', value: 1, cls: 'btn-primary' }, { label: 'إلغاء', value: null }],
@@ -601,9 +614,11 @@ export function renderStages(container) {
       ]);
     }
     if (e.target.matches('[data-add-group]')) edit(`إضافة شعبة — ${st.name}`, groupFields, {}, (v) =>
-      batchWrite([{ op: 'set', col: 'groups', id: uid(), data: { ...v, students: Number(v.students) || 0, stageId: st.id, deptId } }]));
-    if (e.target.matches('[data-edit-group]')) edit('تعديل شعبة', groupFields, g, (v) =>
-      batchWrite([{ op: 'update', col: 'groups', id: g.id, data: { ...v, students: Number(v.students) || 0 } }]));
+      batchWrite([{ op: 'set', col: 'groups', id: uid(), data: { ...groupData(v), stageId: st.id, deptId } }]));
+    if (e.target.matches('[data-edit-group]')) edit('تعديل شعبة', groupFields, { ...g, subgroupsText: (g.subgroups || []).join(', ') }, (v) => {
+      const data = groupData(v);
+      return batchWrite([{ op: 'update', col: 'groups', id: g.id, data }, ...cleanSessions(g.id, data.subgroups)]);
+    });
     if (e.target.matches('[data-del-group]')) {
       if (!(await confirmDialog(`حذف الشعبة ${groupLabel(g)}؟ ستُزال من محاضراتها.`, { danger: true, okLabel: 'حذف' }))) return;
       const ops = [];

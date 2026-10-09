@@ -6,6 +6,14 @@
 import { DAY_NAMES, formatTime, formatRange, assignLanes, snap } from './timeutil.js';
 import { esc, el, colorFor, colorBorderFor } from './ui.js';
 import { sessionLines } from './model.js';
+import { store } from './store.js';
+import { subsOf, subgroupColor } from './subgroups.js';
+
+/** شارات ملوّنة لمجاميع العملي (A, B…) */
+const subChips = (s) => {
+  const g = store.data.groups.find((x) => x.id === s.groupIds?.[0]);
+  return subsOf(s).map((x) => { const [c] = subgroupColor(g, x); return `<span class="sg-chip" style="background:${c}">${esc(x)}</span>`; }).join('');
+};
 
 const LANE_H = 66;
 
@@ -66,13 +74,13 @@ export function renderGrid(o) {
     const err = issues.some((i) => i.level === 'error');
     const warn = !err && issues.length > 0;
     const key = s.subjectId || s.title || s.id;
-    const lines = sessionLines(s, o.viewType);
+    const lines = sessionLines(s, o.viewType, { withSub: false }); // المجموعة تظهر كشارة ملوّنة
     const b = el(`<div class="tt-block ${s.kind} ${err ? 'has-error' : ''} ${warn ? 'has-warning' : ''} ${s.locked ? 'locked' : ''}"
       tabindex="0" data-id="${esc(s.id)}"
       style="right:${pct(s.start)}%;width:${pct(s.end) - pct(s.start)}%;top:${lane * LANE_H + 3}px;height:${LANE_H - 4}px;
              background:${colorFor(key)};border-color:${colorBorderFor(key)}"
       title="${esc([...lines, formatRange(s.start, s.end), ...issues.map((i) => '⚠ ' + i.message)].join('\n'))}">
-      <div class="tt-b-time">${formatRange(s.start, s.end)}${s.locked ? ' 🔒' : ''}${err ? ' ⛔' : warn ? ' ⚠️' : ''}</div>
+      <div class="tt-b-time">${subChips(s)}${formatRange(s.start, s.end)}${s.locked ? ' 🔒' : ''}${err ? ' ⛔' : warn ? ' ⚠️' : ''}</div>
       <div class="tt-b-title">${esc(lines[0])}</div>
       ${lines.slice(1).map((l) => `<div class="tt-b-sub">${esc(l)}</div>`).join('')}
       ${o.onMove && (!o.canDrag || o.canDrag(s)) ? '<div class="tt-resize" title="اسحب لتغيير المدة"></div>' : ''}

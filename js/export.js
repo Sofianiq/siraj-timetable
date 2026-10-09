@@ -10,6 +10,7 @@ import { esc, el, loadScript, download, modal, toast } from './ui.js';
 import { settings, byId, store } from './store.js';
 import { sessionsForView, viewHeader, subjectName, teacherName, roomName, groupLabel, collegeName, stageName } from './model.js';
 import { themeKeyForDept, themeKeyForCollege, themeOf } from './themes.js';
+import { subsOf, subgroupColor, subgroupLabel } from './subgroups.js';
 import { UNIVERSITY } from './branding.js';
 
 const HTML2CANVAS = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
@@ -90,6 +91,31 @@ function printInfo(type, id, days) {
 }
 
 /**
+ * في جدول الشعبة: محاضرات مجاميع العملي المختلفة (A, B, C…) المتداخلة زمنياً تُجمع في خانة واحدة مكدّسة،
+ * لكل مجموعة سطر بلونها. المحاضرات للشعبة كاملة تبقى خانات عادية.
+ */
+export function stackSubgroups(items) {
+  const out = [];
+  for (const s of [...items].sort((a, b) => a.start - b.start || a.end - b.end)) {
+    const subs = subsOf(s);
+    const st = subs.length && out.find((x) => x.stack && x.start < s.end && s.start < x.end
+      && x.members.every((m) => !subsOf(m).some((v) => subs.includes(v))));
+    if (st) { st.members.push(s); st.start = Math.min(st.start, s.start); st.end = Math.max(st.end, s.end); }
+    else if (subs.length) out.push({ id: `stk-${s.id}`, stack: true, day: s.day, start: s.start, end: s.end, members: [s] });
+    else out.push(s);
+  }
+  return out.map((x) => (x.stack && x.members.length === 1 ? x.members[0] : x));
+}
+
+/** أعضاء الخانة المكدّسة مرتبين بترتيب المجاميع في الشعبة */
+function stackMembers(st) {
+  const g = byId('groups', st.members[0].groupIds?.[0]);
+  const order = (x) => { const i = (g?.subgroups || []).indexOf(subsOf(x)[0]); return i < 0 ? 99 : i; };
+  return { g, members: [...st.members].sort((a, b) => order(a) - order(b)) };
+}
+const groupsCountAr = (n) => (n === 2 ? 'مجموعتان' : n <= 10 ? `${n} مجاميع` : `${n} مجموعة`);
+
+/**
  * تجهيز بيانات جدول واحد بشكل خانات (Slots) صالح للطباعة وExcel.
  * المحور الزمني ثابت من إعدادات الطباعة (افتراضياً 8:30 إلى 3:30) ويتسع تلقائياً لأي محاضرة خارجه.
  */
@@ -109,7 +135,8 @@ export function tableModel(type, id) {
   for (let m = from; m < to; m += step) slots.push(m);
   const rows = [];
   for (const day of days) {
-    const items = sessions.filter((s) => s.day === day);
+    const daySessions = sessions.filter((s) => s.day === day);
+    const items = type === 'group' ? stackSubgroups(daySessions) : daySessions;
     const { lanes, count } = assignLanes(items);
     for (let lane = 0; lane < count; lane++) {
       rows.push({ day, lane, laneCount: count, items: items.filter((s) => lanes.get(s.id) === lane).sort((a, b) => a.start - b.start) });
@@ -124,7 +151,8 @@ const KIND_LABEL = { theory: 'نظري', practical: 'عملي', external: 'حج�
 /** أسطر التفاصيل داخل خانة المحاضرة حسب نوع الجدول */
 function cardMeta(s, type) {
   const rows = [];
-  const groups = (s.groupIds || []).map((gid) => groupLabel(byId('groups', gid), { withDept: type !== 'loose' })).join(' + ');
+  const sub = subgroupLabel(s);
+  const groups = (s.groupIds || []).map((gid) => groupLabel(byId('groups', gid), { withDept: type !== 'loose' })).join(' + ') + (sub ? ` (${sub})` : '');
   if (type !== 'teacher' && s.kind !== 'external') rows.push(['التدريسي', teacherName(s.teacherId)]);
   if (type !== 'room') rows.push(['القاعة', roomName(s.roomId)]);
   if ((type === 'teacher' || type === 'room') && groups) rows.push(['الشعبة', groups]);
@@ -132,12 +160,34 @@ function cardMeta(s, type) {
   return rows;
 }
 
+/** خانة مكدّسة: مجاميع العملي في الوقت نفسه، لكل مجموعة سطر بلونها */
+function stackHTML(st, m, span) {
+  const { g, members } = stackMembers(st);
+  const kinds = new Set(members.map((x) => x.kind));
+  const kind = kinds.size === 1 ? [...kinds][0] : 'practical';
+  const sameTime = members.every((x) => x.start === st.start && x.end === st.end);
+  const sf = members.length <= 2 ? 1 : members.length <= 4 ? 0.9 : members.length <= 6 ? 0.8 : 0.7;
+  const rows = members.map((x) => {
+    const [c, bg] = subgroupColor(g, subsOf(x)[0]);
+    const meta = [teacherName(x.teacherId), roomName(x.roomId)].filter(Boolean).join(' • ');
+    return `<div class="sg-row" style="--sg:${c};--sgb:${bg}"><span class="sg-tag">${esc(subsOf(x).join('+'))}</span>
+      <span class="sg-body"><span class="sg-name">${esc(subjectName(x))}${kinds.size > 1 ? ` (${KIND_LABEL[x.kind]})` : ''}</span>${meta ? `<span class="sg-meta">${esc(meta)}</span>` : ''}${sameTime ? '' : `<span class="sg-time">${rangeHTML(x.start, x.end)}</span>`}</span></div>`;
+  }).join('');
+  return `<td class="sc stk ${kind === 'theory' ? 'th' : 'pr'}" colspan="${span}" style="--sf:${sf}"><div class="cd">
+    <div class="cd-top"><span class="badge">${KIND_LABEL[kind] || 'عملي'}</span><span class="tm">${rangeHTML(st.start, st.end)}</span><span class="stk-n">${groupsCountAr(members.length)}</span></div>
+    <div class="sg-rows">${rows}</div>
+  </div></td>`;
+}
+
 function cardHTML(s, m, span) {
+  if (s.stack) return stackHTML(s, m, span);
   const kind = s.kind === 'practical' ? 'pr' : s.kind === 'external' ? 'ex' : 'th';
+  const g1 = byId('groups', s.groupIds?.[0]);
+  const subTag = m.type === 'group' ? subsOf(s).map((x) => `<span class="sg-tag" style="--sg:${subgroupColor(g1, x)[0]}">${esc(x)}</span>`).join('') : '';
   const size = span * m.step <= 60 ? ' narrow' : span * m.step >= 180 ? ' wide' : '';
   const meta = cardMeta(s, m.type).map(([k, v]) => `<div><span class="k">${esc(k)}:</span> <span class="v">${v ? esc(v) : '—'}</span></div>`).join('');
   return `<td class="sc ${kind}${size}" colspan="${span}"><div class="cd">
-    <div class="cd-top"><span class="badge">${KIND_LABEL[s.kind] || 'نظري'}</span><span class="tm">${rangeHTML(s.start, s.end)}</span></div>
+    <div class="cd-top">${subTag}<span class="badge">${KIND_LABEL[s.kind] || 'نظري'}</span><span class="tm">${rangeHTML(s.start, s.end)}</span></div>
     <div class="cd-name">${esc(subjectName(s))}</div>
     <div class="cd-meta">${meta}</div>
   </div></td>`;
@@ -435,9 +485,33 @@ export async function exportExcel(tables, filename) {
         const c1 = colOf(a), c2 = colOf(Math.min(s.end, m.to)) - 1;
         if (c2 > c1) ws.mergeCells(row, c1, row, c2);
         const cell = ws.getCell(row, c1);
+        const listRow = (x) => listRows.push([plain(`${p.meta[0]} — ${p.org.slice(1).join(' — ')}`), DAY_NAMES[x.day], formatTime(x.start), formatTime(x.end),
+          subjectName(x) + (x.kind === 'practical' ? ' (عملي)' : x.kind === 'external' ? ' (حجز)' : ' (نظري)'),
+          teacherName(x.teacherId), roomName(x.roomId), (x.groupIds || []).map((g) => groupLabel(byId('groups', g), { withDept: true })).join(' + ') + (subgroupLabel(x) ? ` (${subgroupLabel(x)})` : '')]);
+        if (s.stack) {
+          // خانة مكدّسة: سطر لكل مجموعة عملي بلونها
+          const { g, members } = stackMembers(s);
+          const runs = [{ text: `${KIND_LABEL[members[0].kind] || 'عملي'}  |  ${clockRange(s.start, s.end)}  —  ${groupsCountAr(members.length)}`, font: { name: TNR, size: 10, bold: true, color: { argb: argb(th.accent) } } }];
+          for (const x of members) {
+            const [c] = subgroupColor(g, subsOf(x)[0]);
+            const meta = [teacherName(x.teacherId), roomName(x.roomId)].filter(Boolean).join(' • ');
+            const time = x.start === s.start && x.end === s.end ? '' : `  (${clockRange(x.start, x.end)})`;
+            runs.push({ text: `\n${subsOf(x).join('+')}: `, font: { name: TNR, size: 11, bold: true, color: { argb: argb(c) } } });
+            runs.push({ text: `${subjectName(x)}${meta ? ` — ${meta}` : ''}${time}`, font: { name: TNR, size: 10, color: { argb: 'FF1B262C' } } });
+            listRow(x);
+          }
+          cell.value = { richText: runs };
+          cell.fill = fill(th.practical);
+          cell.alignment = { wrapText: true, horizontal: 'center', vertical: 'middle' };
+          cell.border = { ...gapBorder, top: { style: 'thick', color: { argb: argb(th.accent) } } };
+          ws.getRow(row).height = Math.max(ws.getRow(row).height || 0, 22 + members.length * 15);
+          cur = Math.max(cur, Math.min(s.end, m.to));
+          return;
+        }
         const tone = s.kind === 'practical' ? th.accent : s.kind === 'external' ? '#6B5A8C' : th.main;
+        const subTxt = subgroupLabel(s);
         cell.value = { richText: [
-          { text: `${KIND_LABEL[s.kind] || 'نظري'}  |  ${clockRange(s.start, s.end)}\n`, font: { name: TNR, size: 10, bold: true, color: { argb: argb(tone) } } },
+          { text: `${KIND_LABEL[s.kind] || 'نظري'}${subTxt ? ` — ${subTxt}` : ''}  |  ${clockRange(s.start, s.end)}\n`, font: { name: TNR, size: 10, bold: true, color: { argb: argb(tone) } } },
           { text: `${subjectName(s)}\n`, font: { name: TNR, size: 12, bold: true, color: { argb: 'FF1B262C' } } },
           { text: cardMeta(s, m.type).map(([k, v]) => `${k}: ${v || '—'}`).join('\n'), font: { name: TNR, size: 10, color: { argb: argb(th.ink) } } },
         ] };
@@ -445,8 +519,7 @@ export async function exportExcel(tables, filename) {
         cell.alignment = { wrapText: true, horizontal: 'center', vertical: 'middle' };
         cell.border = { ...gapBorder, top: { style: 'thick', color: { argb: argb(tone) } } };
         cur = Math.max(cur, Math.min(s.end, m.to));
-        listRows.push([plain(`${p.meta[0]} — ${p.org.slice(1).join(' — ')}`), DAY_NAMES[s.day], formatTime(s.start), formatTime(s.end), subjectName(s) + (s.kind === 'practical' ? ' (عملي)' : s.kind === 'external' ? ' (حجز)' : ' (نظري)'),
-          teacherName(s.teacherId), roomName(s.roomId), (s.groupIds || []).map((g) => groupLabel(byId('groups', g), { withDept: true })).join(' + ')]);
+        listRow(s);
       });
       for (let c = 2; c <= totalCols; c++) {
         const x = ws.getCell(row, c);

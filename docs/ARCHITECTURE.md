@@ -67,6 +67,7 @@ tests/                     اختبارات آلية
 | `departments` | `name`، `short`، `collegeId`، و`general` (قسم عام يمثل كلية لا تقسم طلبتها إلى أقسام، مثل الصيدلة) |
 | `stages` | `deptId`، `level` (1–6)، `name` |
 | `groups` (الشعب) | `deptId`، `stageId`، `name`، `shift` (`morning`/`evening`)، `students` |
+| `groups.subgroups` / `sessions.subgroups` | مجاميع العملي للشعبة (مثل `['A','B','C','D']`)، ومجاميع المحاضرة (فارغة = الشعبة كاملة). مجموعتان مختلفتان لا تتعارضان (`js/subgroups.js`) |
 | `teachers` | `name`، `title`، `deptId` (القسم الأساسي، ومنه الكلية الأساسية)، `sharedColleges` (الكليات الأخرى التي يدرّس فيها)، و`availability` بالشكل `{رقم اليوم: [[من, إلى], ...]}` بالدقائق |
 | `rooms` | `name`، `type` (`hall`/`lab`/`other`)، `labKind`، `capacity`، `collegeId`، `deptId`، `active` |
 | `subjects` | `deptId`، `stageLevel`، `semester`، `name`، `theoryHours`، `practicalHours`، `labType`، `theoryTeacherId`، `practicalTeacherId`، `combineTheory` |
