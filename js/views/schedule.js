@@ -12,7 +12,7 @@ import {
   VIEW_TYPES, viewHeader, stageName, currentCollegeId, setCurrentCollege, managedColleges, deptsOfCollege, deptOptionsHTML,
   collegeName, collegeShort,
 } from '../model.js';
-import { exportPDF, exportExcel, printTables } from '../export.js';
+import { exportPDF, exportExcel, printTables, savePDF, setPrintProvider } from '../export.js';
 
 const state = {
   type: 'group', id: '', deptId: '',
@@ -99,13 +99,16 @@ export function renderSchedule(container, params = {}, { publicMode = false } = 
       <div class="dropdown">
         <button class="btn" id="expBtn">⬇ تصدير / طباعة</button>
         <div class="dropdown-menu" hidden>
-          <button data-exp="pdf">PDF — هذا الجدول</button>
-          <button data-exp="xlsx">Excel — هذا الجدول</button>
-          <button data-exp="print">طباعة هذا الجدول</button>
+          <button data-exp="pdf">📄 حفظ PDF — هذا الجدول</button>
+          <button data-exp="xlsx">📊 Excel — هذا الجدول</button>
+          <button data-exp="print">🖨 طباعة هذا الجدول</button>
           <hr>
-          <button data-exp="pdf-all">PDF — كل شعب ${state.type === 'college' ? 'الكلية' : 'القسم'}</button>
-          <button data-exp="xlsx-all">Excel — كل شعب ${state.type === 'college' ? 'الكلية' : 'القسم'}</button>
-          <button data-exp="print-all">طباعة كل شعب ${state.type === 'college' ? 'الكلية' : 'القسم'}</button>
+          <button data-exp="pdf-all">📄 حفظ PDF — كل شعب ${state.type === 'college' ? 'الكلية' : 'القسم'}</button>
+          <button data-exp="xlsx-all">📊 Excel — كل شعب ${state.type === 'college' ? 'الكلية' : 'القسم'}</button>
+          <button data-exp="print-all">🖨 طباعة كل شعب ${state.type === 'college' ? 'الكلية' : 'القسم'}</button>
+          <hr>
+          <button data-exp="pdfimg" class="muted-item" title="ينشئ ملف PDF كصورة دون فتح نافذة الطباعة">⬇ تنزيل PDF مباشرة (صورة) — هذا الجدول</button>
+          <button data-exp="pdfimg-all" class="muted-item">⬇ تنزيل PDF مباشرة (صورة) — كل الشعب</button>
         </div>
       </div>
       <button class="btn" id="shareBtn" title="نسخ رابط العرض للطلبة">🔗 مشاركة</button>
@@ -138,6 +141,8 @@ export function renderSchedule(container, params = {}, { publicMode = false } = 
   $$('[data-exp]', page).forEach((b) => b.onclick = () => doExport(b.dataset.exp));
 
   function rerender() { renderSchedule(container, {}, { publicMode }); }
+  // Ctrl+P في هذه الصفحة يطبع الجدول المعروض بالتنسيق الرسمي
+  setPrintProvider(() => (state.id ? tablesForExport(false) : []));
 
   // المحتوى
   const sessions = sessionsForView(state.type, state.id);
@@ -253,11 +258,11 @@ export function renderSchedule(container, params = {}, { publicMode = false } = 
     const name = (state.type === 'college' ? `جداول ${collegeName(state.id)}`
       : allMode ? `جداول ${deptName(byId('groups', tables[0].id)?.deptId)}` : viewHeader(state.type, state.id).title).replace(/[\\/:*?"<>|]/g, '-');
     try {
-      toast('جارٍ التجهيز…');
-      if (kind.startsWith('pdf')) await exportPDF(tables, name);
-      else if (kind.startsWith('xlsx')) await exportExcel(tables, name);
-      else printTables(tables);
-    } catch (e) { toast(e.message, 'error'); }
+      if (kind.startsWith('pdfimg')) { toast('جارٍ إنشاء ملف PDF…'); await exportPDF(tables, name); }
+      else if (kind.startsWith('pdf')) await savePDF(tables, name);
+      else if (kind.startsWith('xlsx')) { toast('جارٍ التجهيز…'); await exportExcel(tables, name); }
+      else printTables(tables, name);
+    } catch (e) { console.error(e); toast(`تعذر التصدير: ${e.message || e}`, 'error', 7000); }
   }
 
   function share() {

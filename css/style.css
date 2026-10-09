@@ -382,3 +382,7 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible { outline: 2px sol
   .theme-btn { padding: .25rem; }
 }
 .two-col > *, .cards > *, .stats > *, .college-cards > * { min-width: 0; }
+
+.dropdown-menu button.muted-item { color: var(--muted); font-size: .82rem; }
+.pdf-hint ol { padding-inline-start: 1.2rem; margin: .5rem 0; line-height: 1.9; }
+.pdf-hint b { color: var(--primary-2); }

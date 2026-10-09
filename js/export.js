@@ -1,9 +1,12 @@
 /**
- * تصدير الجداول وطباعتها: PDF (عبر html2pdf) و Excel منسّق (عبر ExcelJS) وطباعة مباشرة.
+ * تصدير الجداول وطباعتها:
+ *  - PDF عبر نافذة الطباعة في المتصفح («حفظ بتنسيق PDF»): الطريقة الأساسية، نص عربي واضح وقابل للنسخ.
+ *  - تنزيل PDF مباشر كصورة (html2canvas + jsPDF): بديل، ويتحول تلقائياً لنافذة الطباعة عند الفشل.
+ *  - Excel منسّق (ExcelJS) وطباعة مباشرة.
  * كل جدول يحمل ترويسة: الجامعة، الكلية، القسم، المرحلة، نوع الدراسة، الشعبة، الفصل والعام الدراسي.
  */
 import { DAY_NAMES, formatRange, formatTime, assignLanes } from './timeutil.js';
-import { esc, el, loadScript, download, colorFor } from './ui.js';
+import { esc, el, loadScript, download, colorFor, modal, toast } from './ui.js';
 import { settings, byId } from './store.js';
 import { sessionsForView, viewHeader, sessionLines, subjectName, teacherName, roomName, groupLabel, collegeName } from './model.js';
 import { UNIVERSITY } from './branding.js';
@@ -91,20 +94,88 @@ function buildPrintRoot(tables) {
   return root;
 }
 
-export function printTables(tables) {
-  buildPrintRoot(tables);
-  document.body.classList.add('printing');
-  const done = () => { document.body.classList.remove('printing'); document.getElementById('print-root')?.remove(); window.removeEventListener('afterprint', done); };
-  window.addEventListener('afterprint', done);
-  setTimeout(() => window.print(), 50);
+/* ------------------------------ الطباعة وحفظ PDF عبر نافذة الطباعة ------------------------------ */
+let builtAt = 0;
+let printProvider = null;
+let savedTitle = null;
+
+/** صفحة الجداول تسجل هنا الجداول المعروضة، فيطبع Ctrl+P الجدول بالتنسيق الرسمي */
+export function setPrintProvider(fn) {
+  printProvider = fn;
+  if (!fn) { builtAt = 0; clearPrint(); } // مغادرة صفحة الجداول: لا تُطبع جداول قديمة
 }
 
+function preparePrint(tables, title) {
+  buildPrintRoot(tables);
+  document.body.classList.add('printing');
+  builtAt = Date.now();
+  // اسم الصفحة يصبح الاسم الافتراضي لملف PDF المحفوظ
+  if (title) { if (savedTitle === null) savedTitle = document.title; document.title = title; }
+}
+function clearPrint() {
+  document.body.classList.remove('printing');
+  document.getElementById('print-root')?.remove();
+}
+window.addEventListener('beforeprint', () => {
+  if (Date.now() - builtAt < 5000) return; // طباعة بدأت من أزرار النظام وجاهزة
+  const tables = printProvider?.();
+  if (tables?.length && tables[0].id) preparePrint(tables);
+  else clearPrint();
+});
+window.addEventListener('afterprint', () => {
+  // لا نحذف محتوى الطباعة هنا (بعض المتصفحات تطلق الحدث قبل اكتمال المعاينة)؛ يُستبدل عند الطباعة التالية
+  setTimeout(() => { if (savedTitle !== null) { document.title = savedTitle; savedTitle = null; } }, 1500);
+});
+
+export function printTables(tables, title) {
+  preparePrint(tables, title);
+  window.print();
+}
+
+const HINT_KEY = 'siraj-pdf-hint-hidden';
+/** حفظ PDF عبر نافذة الطباعة مع إرشادات مختصرة (تظهر حتى يطلب المستخدم إخفاءها) */
+export async function savePDF(tables, filename) {
+  let hidden = false;
+  try { hidden = localStorage.getItem(HINT_KEY) === '1'; } catch { /* تجاهل */ }
+  if (!hidden) {
+    const body = el(`<div class="pdf-hint">
+      <p>ستفتح نافذة الطباعة الآن، ومنها تحفظ الجدول كملف PDF:</p>
+      <ol>
+        <li>في خانة <b>الطابعة / الوجهة</b> (Destination) اختر <b>«حفظ بتنسيق PDF»</b> (Save as PDF) أو <b>Microsoft Print to PDF</b>.</li>
+        <li>تأكد أن <b>التخطيط</b> (Layout) هو <b>أفقي</b> (Landscape).</li>
+        <li>إذا لم تظهر الألوان: من <b>إعدادات إضافية</b> (More settings) فعّل <b>رسومات الخلفية</b> (Background graphics).</li>
+        <li>اضغط <b>حفظ</b> (Save) واختر مكان الملف.</li>
+      </ol>
+      <p class="muted small">على الهاتف: من نافذة الطباعة اضغط زر المشاركة ثم «حفظ في الملفات».</p>
+      <label class="chk"><input type="checkbox" id="noHint"> لا تُظهر هذه الإرشادات مجدداً</label>
+    </div>`);
+    const go = await modal({
+      title: '📄 حفظ الجدول كملف PDF', body, size: 'sm',
+      buttons: [{ label: 'فتح نافذة الطباعة', value: true, cls: 'btn-primary' }, { label: 'إلغاء', value: false }],
+      onButton: (v, root) => {
+        if (v && root.querySelector('#noHint').checked) { try { localStorage.setItem(HINT_KEY, '1'); } catch { /* تجاهل */ } }
+        return true;
+      },
+    });
+    if (!go) return;
+  }
+  printTables(tables, filename);
+}
+
+/** تنزيل PDF مباشر (الجدول كصورة). عند أي خطأ يُحوَّل المستخدم إلى الحفظ عبر نافذة الطباعة. */
 export async function exportPDF(tables, filename) {
-  await Promise.all([loadScript(HTML2CANVAS), loadScript(JSPDF)]);
+  try {
+    await Promise.all([loadScript(HTML2CANVAS), loadScript(JSPDF)]);
+  } catch (e) {
+    toast('تعذر تحميل مكتبة إنشاء PDF (تحقق من الإنترنت). سنستخدم نافذة الطباعة بدلاً منها.', 'warn', 6000);
+    return savePDF(tables, filename);
+  }
   const root = buildPrintRoot(tables);
   root.classList.add('pdf-render');
   const cover = el('<div class="pdf-cover"><div class="spinner"></div><p>جارٍ إنشاء ملف PDF…</p></div>');
   document.body.appendChild(cover);
+  const scrollY = window.scrollY, scrollX = window.scrollX;
+  window.scrollTo(0, 0);
   try {
     await Promise.race([document.fonts?.ready, new Promise((r) => setTimeout(r, 4000))]);
     const pdf = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4', compress: true });
@@ -112,7 +183,11 @@ export async function exportPDF(tables, filename) {
     const pages = [...root.querySelectorAll('.print-page')];
     for (let i = 0; i < pages.length; i++) {
       // كل جدول يُرسم كصورة عالية الدقة ويُضبط ليتسع للصفحة (مع تقسيمه إن كان أطول من صفحة)
-      const canvas = await window.html2canvas(pages[i], { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+      const canvas = await window.html2canvas(pages[i], {
+        scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false,
+        scrollX: 0, scrollY: 0, windowWidth: Math.max(1200, document.documentElement.clientWidth),
+      });
+      if (!canvas.width || !canvas.height) throw new Error('صورة الجدول فارغة');
       const imgW = W - 2 * M;
       const pxPerMm = canvas.width / imgW;
       const pageHpx = Math.floor((H - 2 * M) * pxPerMm);
@@ -125,10 +200,17 @@ export async function exportPDF(tables, filename) {
         pdf.addImage(slice.toDataURL('image/jpeg', 0.95), 'JPEG', M, M, imgW, sliceH / pxPerMm);
       }
     }
-    pdf.save(`${filename}.pdf`);
+    download(`${filename}.pdf`, pdf.output('blob'));
+    toast('تم تنزيل ملف PDF — تجده في مجلد التنزيلات', 'success', 4000);
+  } catch (e) {
+    console.error(e);
+    toast(`تعذر إنشاء PDF مباشرة (${e.message || e}). سنستخدم نافذة الطباعة بدلاً منها.`, 'warn', 7000);
+    root.remove(); cover.remove();
+    return savePDF(tables, filename);
   } finally {
     root.remove();
     cover.remove();
+    window.scrollTo(scrollX, scrollY);
   }
 }
 

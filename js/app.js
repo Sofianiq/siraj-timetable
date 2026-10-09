@@ -10,6 +10,7 @@ import { renderGenerate } from './views/generate.js';
 import { renderDashboard, renderConflicts, renderUsers, renderSettings, renderLogin, ROLE_NAMES } from './views/pages.js';
 import { seedOps, migrationOps } from './seed/radiology.js';
 import { deptName, collegeShort, managedColleges, currentCollegeId, setCurrentCollege } from './model.js';
+import { setPrintProvider } from './export.js';
 
 const NAV = [
   { path: 'dashboard', label: 'لوحة التحكم', icon: '🏠' },
@@ -164,6 +165,7 @@ function route() {
     if (target === 'public' && r !== 'guest' && !params.type) target = 'schedule';
   }
   current = { path: target, params };
+  setPrintProvider(null); // صفحة الجداول تعيد تسجيل ما يُطبع
   document.body.classList.toggle('public-mode', target === 'public' || target === 'login');
   renderNav(target);
   draw(true);
