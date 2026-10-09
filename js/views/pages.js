@@ -216,6 +216,9 @@ export function renderSettings(container) {
         <div class="field"><label>الدوام الصباحي: إلى</label><input type="time" id="me" value="${toHHMM(sh.morning.end)}"></div>
         <div class="field"><label>الدوام المسائي: من</label><input type="time" id="es" value="${toHHMM(sh.evening.start)}"></div>
         <div class="field"><label>الدوام المسائي: إلى</label><input type="time" id="ee" value="${toHHMM(sh.evening.end)}"></div>
+        <div class="field"><label>الجدول المطبوع: من الساعة</label><input type="time" id="ps" value="${toHHMM(s.printStart ?? 510)}">
+          <small class="muted">أعمدة الساعات في PDF والطباعة وExcel. تتسع تلقائياً لأي محاضرة خارجها.</small></div>
+        <div class="field"><label>الجدول المطبوع: إلى الساعة</label><input type="time" id="pe" value="${toHHMM(s.printEnd ?? 930)}"></div>
         <div class="field"><label>دقة تحريك الوقت (دقيقة)</label><select id="slot">${[5, 10, 15, 30, 60].map((m) => `<option ${m === (s.slotMinutes || 30) ? 'selected' : ''}>${m}</option>`).join('')}</select>
           <small class="muted">عند السحب والإفلات يُقرَّب الوقت لأقرب مضاعف لهذه القيمة.</small></div>
       </div>
@@ -247,6 +250,7 @@ export function renderSettings(container) {
       days: $$('[name=day]:checked', page).map((i) => Number(i.value)).sort((a, b) => a - b),
       dayStart: toMinutes($('#ds', page).value), dayEnd: toMinutes($('#de', page).value),
       slotMinutes: Number($('#slot', page).value),
+      printStart: toMinutes($('#ps', page).value), printEnd: toMinutes($('#pe', page).value),
       shifts: {
         morning: { start: toMinutes($('#ms', page).value), end: toMinutes($('#me', page).value) },
         evening: { start: toMinutes($('#es', page).value), end: toMinutes($('#ee', page).value) },
@@ -254,6 +258,7 @@ export function renderSettings(container) {
     };
     if (!data.days.length) { toast('اختر يوماً واحداً على الأقل', 'warn'); return; }
     if (data.dayEnd <= data.dayStart) { toast('نهاية اليوم يجب أن تكون بعد بدايته', 'warn'); return; }
+    if (data.printEnd <= data.printStart) { toast('نهاية الجدول المطبوع يجب أن تكون بعد بدايته', 'warn'); return; }
     delete data.id;
     await set('settings', 'app', data);
     toast('تم حفظ الإعدادات', 'success');

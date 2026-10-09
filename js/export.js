@@ -5,30 +5,106 @@
  *  - Excel منسّق (ExcelJS) وطباعة مباشرة.
  * كل جدول يحمل ترويسة: الجامعة، الكلية، القسم، المرحلة، نوع الدراسة، الشعبة، الفصل والعام الدراسي.
  */
-import { DAY_NAMES, formatRange, formatTime, assignLanes } from './timeutil.js';
-import { esc, el, loadScript, download, colorFor, modal, toast } from './ui.js';
-import { settings, byId } from './store.js';
-import { sessionsForView, viewHeader, sessionLines, subjectName, teacherName, roomName, groupLabel, collegeName } from './model.js';
+import { DAY_NAMES, SHIFTS, formatTime, assignLanes } from './timeutil.js';
+import { esc, el, loadScript, download, modal, toast } from './ui.js';
+import { settings, byId, store } from './store.js';
+import { sessionsForView, viewHeader, subjectName, teacherName, roomName, groupLabel, collegeName, stageName } from './model.js';
+import { themeKeyForDept, themeKeyForCollege, themeOf } from './themes.js';
 import { UNIVERSITY } from './branding.js';
 
 const HTML2CANVAS = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
 const JSPDF = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
 const EXCELJS = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
 
-/** تجهيز بيانات جدول واحد بشكل خانات (Slots) صالح للطباعة وExcel */
+/* ------------------------------ نموذج الجدول ------------------------------ */
+const SEM_FULL = { 1: 'الفصل الدراسي الأول', 2: 'الفصل الدراسي الثاني' };
+/** 8:30 (نظام 12 ساعة بدون لاحقة، كما في الجدول الرسمي) */
+export const clock = (min) => { let h = Math.floor(min / 60) % 12; if (h === 0) h = 12; return `${h}:${String(min % 60).padStart(2, '0')}`; };
+const period = (min) => (min < 720 ? 'صباحاً' : min < 900 ? 'ظهراً' : min < 1020 ? 'عصراً' : 'مساءً');
+/** «من 8:30 إلى 9:30» مع إبراز الأرقام */
+const rangeHTML = (a, b) => `من <b>${clock(a)}</b> إلى <b>${clock(b)}</b>`;
+
+/** «من السبت إلى الأربعاء» إن كانت الأيام متتالية، وإلا تُسرد */
+function daysText(days) {
+  const sorted = [...days].sort((a, b) => a - b);
+  const consecutive = sorted.every((d, i) => i === 0 || d === sorted[i - 1] + 1);
+  if (sorted.length > 2 && consecutive) return `من ${DAY_NAMES[sorted[0]]} إلى ${DAY_NAMES[sorted[sorted.length - 1]]}`;
+  return sorted.map((d) => DAY_NAMES[d]).join('، ');
+}
+
+/** ترويسة الجدول المطبوع: الجهة (يمين)، العنوان (وسط)، المرحلة/الأستاذ/القاعة والفصل والعام (يسار)، ولون القسم */
+function printInfo(type, id, days) {
+  const st = settings();
+  const info = { org: [UNIVERSITY], title: 'الجدول الأسبوعي للمحاضرات', meta: [], shift: '', theme: 'teal', sign: 'رئيس القسم' };
+  const deptOrg = (d) => [collegeName(d?.collegeId), d && !d.general ? d.name : ''];
+  if (type === 'group' || type === 'loose') {
+    let d, stage, g;
+    if (type === 'group') { g = byId('groups', id); stage = byId('stages', g?.stageId); d = byId('departments', g?.deptId); }
+    else {
+      const [deptId, level = ''] = String(id).split('|');
+      d = byId('departments', deptId);
+      stage = store.data.stages.find((x) => x.deptId === deptId && String(x.level) === level) || (level ? { level: Number(level) } : null);
+    }
+    info.org.push(...deptOrg(d));
+    const sub = g && g.name && g.name !== SHIFTS[g.shift] ? ` — شعبة ${g.name}` : '';
+    info.meta.push(stage ? stageName(stage) + sub : 'محاضرات غير مرتبطة بشعبة');
+    info.shift = g?.shift || 'morning';
+    info.theme = themeKeyForDept(d?.id);
+    if (d?.general) info.sign = 'عميد الكلية';
+  } else if (type === 'dept') {
+    const d = byId('departments', id);
+    info.org.push(...deptOrg(d));
+    info.meta.push(d?.general ? 'الجدول العام' : d?.short || d?.name || '');
+    info.theme = themeKeyForDept(id);
+  } else if (type === 'college') {
+    info.org.push(collegeName(id));
+    info.meta.push('الجدول العام');
+    info.theme = themeKeyForCollege(id);
+    info.sign = 'عميد الكلية';
+  } else if (type === 'teacher') {
+    const t = byId('teachers', id);
+    const d = byId('departments', t?.deptId);
+    info.org.push(...deptOrg(d));
+    info.title = 'الجدول الأسبوعي للتدريسي';
+    info.meta.push(`${t?.title ? `${t.title}: ` : ''}${t?.name || ''}`);
+    info.theme = themeKeyForDept(t?.deptId);
+    info.sign = 'معاون العميد للشؤون العلمية';
+  } else if (type === 'room') {
+    const r = byId('rooms', id);
+    info.org.push(collegeName(r?.collegeId), r?.building || '');
+    info.title = r?.type === 'lab' ? 'جدول إشغال المختبر الأسبوعي' : 'جدول إشغال القاعة الأسبوعي';
+    info.meta.push(`${r?.name || ''}${r?.capacity ? ` <small>(سعة ${r.capacity})</small>` : ''}`);
+    info.metaHTML = true;
+    info.theme = r?.deptId ? themeKeyForDept(r.deptId) : themeKeyForCollege(r?.collegeId);
+    info.sign = 'معاون العميد للشؤون العلمية';
+  }
+  info.org = info.org.filter(Boolean);
+  info.meta.push(SEM_FULL[st.semester] || '');
+  const [y1, y2] = String(st.academicYear || '').split(/[-–]/).map((x) => x.trim());
+  info.year = y2 ? `${y1} – ${y2}` : y1 || '';
+  // سطر الدوام: أيام الدوام ووقت دوام الشعبة (صباحي/مسائي)
+  const sh = info.shift && st.shifts?.[info.shift];
+  info.sub = `${info.shift === 'evening' ? 'الدوام المسائي' : 'الدوام الرسمي'}: ${daysText(days)}`
+    + (sh ? ` • من <b>${clock(sh.start)}</b> ${period(sh.start)} إلى <b>${clock(sh.end)}</b> ${period(sh.end)}` : '');
+  return info;
+}
+
+/**
+ * تجهيز بيانات جدول واحد بشكل خانات (Slots) صالح للطباعة وExcel.
+ * المحور الزمني ثابت من إعدادات الطباعة (افتراضياً 8:30 إلى 3:30) ويتسع تلقائياً لأي محاضرة خارجه.
+ */
 export function tableModel(type, id) {
   const st = settings();
-  const step = st.slotMinutes || 30;
   const days = st.days?.length ? st.days : [1, 2, 3, 4, 5];
-  const sessions = sessionsForView(type, id);
-  // حصر المحور الزمني بالساعات المستخدمة فعلاً (مع حد أدنى من إعدادات الدوام)
-  let from = st.dayStart ?? 480, to = st.dayEnd ?? 1200;
-  if (sessions.length) {
-    from = Math.min(...sessions.map((s) => s.start));
-    to = Math.max(...sessions.map((s) => s.end));
-    from = Math.floor(from / 60) * 60;
-    to = Math.ceil(to / 60) * 60;
-  } else { to = Math.min(to, from + 6 * 60); }
+  const sessions = sessionsForView(type, id).filter((s) => days.includes(s.day));
+  let from = st.printStart ?? 510, to = st.printEnd ?? 930;
+  if (to <= from) to = from + 420;
+  for (const s of sessions) {
+    while (s.start < from) from -= 60;
+    while (s.end > to) to += 60;
+  }
+  // خانة نصف ساعة، أو ربع ساعة إن وُجدت أوقات غير منتظمة
+  const step = sessions.every((s) => (s.start - from) % 30 === 0 && (s.end - from) % 30 === 0) ? 30 : 15;
   const slots = [];
   for (let m = from; m < to; m += step) slots.push(m);
   const rows = [];
@@ -39,57 +115,96 @@ export function tableModel(type, id) {
       rows.push({ day, lane, laneCount: count, items: items.filter((s) => lanes.get(s.id) === lane).sort((a, b) => a.start - b.start) });
     }
   }
-  return { type, id, header: viewHeader(type, id), step, from, to, slots, rows, days, count: sessions.length };
+  const print = printInfo(type, id, days);
+  return { type, id, header: viewHeader(type, id), print, theme: themeOf(print.theme), step, from, to, slots, rows, days, count: sessions.length };
 }
 
-function sessionText(s, type) {
-  return [...sessionLines(s, type), formatRange(s.start, s.end)];
+const KIND_LABEL = { theory: 'نظري', practical: 'عملي', external: 'حجز' };
+
+/** أسطر التفاصيل داخل خانة المحاضرة حسب نوع الجدول */
+function cardMeta(s, type) {
+  const rows = [];
+  const groups = (s.groupIds || []).map((gid) => groupLabel(byId('groups', gid), { withDept: type !== 'loose' })).join(' + ');
+  if (type !== 'teacher' && s.kind !== 'external') rows.push(['التدريسي', teacherName(s.teacherId)]);
+  if (type !== 'room') rows.push(['القاعة', roomName(s.roomId)]);
+  if ((type === 'teacher' || type === 'room') && groups) rows.push(['الشعبة', groups]);
+  if (s.kind === 'external' && s.bookedBy) rows.push(['الجهة', s.bookedBy]);
+  return rows;
 }
 
-/** HTML جدول قابل للطباعة */
-export function tableHTML(m) {
-  const colsPerHour = 60 / m.step;
-  const hourHeads = [];
-  for (let t = m.from; t < m.to; t += 60) {
-    hourHeads.push(`<th colspan="${Math.min(colsPerHour, (m.to - t) / m.step)}">${formatTime(t)}</th>`);
+function cardHTML(s, m, span) {
+  const kind = s.kind === 'practical' ? 'pr' : s.kind === 'external' ? 'ex' : 'th';
+  const size = span * m.step <= 60 ? ' narrow' : span * m.step >= 180 ? ' wide' : '';
+  const meta = cardMeta(s, m.type).map(([k, v]) => `<div><span class="k">${esc(k)}:</span> <span class="v">${v ? esc(v) : '—'}</span></div>`).join('');
+  return `<td class="sc ${kind}${size}" colspan="${span}"><div class="cd">
+    <div class="cd-top"><span class="badge">${KIND_LABEL[s.kind] || 'نظري'}</span><span class="tm">${rangeHTML(s.start, s.end)}</span></div>
+    <div class="cd-name">${esc(subjectName(s))}</div>
+    <div class="cd-meta">${meta}</div>
+  </div></td>`;
+}
+
+/** HTML جدول قابل للطباعة على صفحة A4 أفقية، بتصميم الجدول الرسمي */
+export function tableHTML(m, { page = 1, pages = 1 } = {}) {
+  const t = m.theme, p = m.print;
+  const perHour = 60 / m.step;
+  const heads = [];
+  for (let x = m.from; x < m.to; x += 60) {
+    const span = Math.min(perHour, Math.round((m.to - x) / m.step));
+    heads.push(`<th class="hr" colspan="${span}">${rangeHTML(x, Math.min(x + 60, m.to))}</th>`);
   }
+  const gap = (from, to, between) => {
+    const n = Math.round((to - from) / m.step);
+    if (n <= 0) return '';
+    return between && to - from >= 30
+      ? `<td class="free" colspan="${n}"><div class="free-t">فترة حرة</div><div class="free-r">${rangeHTML(from, to)}</div></td>`
+      : `<td class="empty" colspan="${n}"></td>`;
+  };
   let body = '';
   for (const r of m.rows) {
     let cells = '';
     let cur = m.from;
-    for (const s of r.items) {
-      const st = Math.max(s.start, m.from);
-      if (st > cur) cells += '<td class="empty"></td>'.repeat(Math.round((st - cur) / m.step));
-      const span = Math.max(1, Math.round((Math.min(s.end, m.to) - st) / m.step));
-      const lines = sessionText(s, m.type);
-      cells += `<td class="sess" colspan="${span}" style="background:${colorFor(s.subjectId || s.title || s.id)}">
-        <b>${esc(lines[0])}</b>${lines.slice(1).map((l) => `<div>${esc(l)}</div>`).join('')}</td>`;
-      cur = st + span * m.step;
-    }
-    if (cur < m.to) cells += '<td class="empty"></td>'.repeat(Math.round((m.to - cur) / m.step));
-    body += `<tr>${r.lane === 0 ? `<th class="day" rowspan="${r.laneCount}">${DAY_NAMES[r.day]}</th>` : ''}${cells}</tr>`;
+    r.items.forEach((s, i) => {
+      const a = Math.max(s.start, cur);
+      cells += gap(cur, a, i > 0 && r.laneCount === 1);
+      const span = Math.max(1, Math.round((Math.min(s.end, m.to) - a) / m.step));
+      cells += cardHTML(s, m, span);
+      cur = a + span * m.step;
+    });
+    if (cur < m.to) cells += gap(cur, m.to, false);
+    const day = r.lane === 0 ? `<th class="day" rowspan="${r.laneCount}"><span>${DAY_NAMES[r.day]}</span></th>` : '';
+    body += `<tr class="${r.items.length ? '' : 'none'}">${day}${cells}</tr>`;
   }
-  const info = m.header.lines.filter(([, v]) => v !== '' && v != null)
-    .map(([k, v]) => `<span><b>${esc(k)}:</b> <span dir="ltr" style="display:inline-block">${esc(String(v).replace(/[\u2066-\u2069]/g, ''))}</span></span>`).join('');
+  const rowsCount = m.rows.length;
+  // حجم الخط يتناسب مع عدد الصفوف حتى يتسع الجدول لصفحة واحدة دائماً
+  const scale = rowsCount <= 4 ? 1.06 : rowsCount === 5 ? 0.97 : Math.max(0.6, 5.1 / rowsCount);
+  const vars = `--d:${t.dark};--m:${t.main};--a:${t.accent};--ink:${t.ink};--th:${t.theory};--pr:${t.practical};--fs:${scale}`;
+  const meta = p.meta.filter(Boolean);
   return `
-  <div class="print-page">
-    <div class="print-head">
-      <div class="ph-org"><div>${esc(UNIVERSITY)}</div>${m.header.collegeId ? `<div>${esc(collegeName(m.header.collegeId))}</div>` : ''}</div>
-      <div class="ph-title">${esc(m.header.title)}</div>
-      <div class="ph-info">${info}</div>
+  <div class="print-page sheet" style="${vars}">
+    <div class="sh-frame">
+      <header class="sh-head">
+        <div class="sh-org">${p.org.map((x, i) => `<div class="o${i}">${esc(x)}</div>`).join('')}</div>
+        <div class="sh-title"><h1>${esc(p.title)}</h1><div class="sub">${p.sub}</div></div>
+        <div class="sh-meta">${meta.map((x, i) => `<div class="m${i}">${p.metaHTML && i === 0 ? x : esc(x)}</div>`).join('')}
+          ${p.year ? `<div class="yr">العام الدراسي <b>${esc(p.year)}</b></div>` : ''}</div>
+      </header>
+      <div class="sh-body"><table class="sh-grid">
+        <colgroup><col class="c-day">${m.slots.map(() => '<col>').join('')}</colgroup>
+        <thead><tr><th class="corner">اليوم / الوقت</th>${heads.join('')}</tr></thead>
+        <tbody>${body}</tbody>
+      </table></div>
+      ${m.count ? '' : '<div class="sh-none">لا توجد محاضرات مجدولة في هذا الجدول</div>'}
+      <footer class="sh-foot">
+        <div class="issued">تاريخ الإصدار: <span dir="ltr">${esc(new Date().toLocaleDateString('en-GB'))}</span>${pages > 1 ? ` &nbsp;•&nbsp; صفحة ${page} من ${pages}` : ''}</div>
+        <div class="sign"><div class="line"></div><div>${esc(p.sign)}</div></div>
+      </footer>
     </div>
-    <table class="print-table">
-      <thead><tr><th class="day">اليوم</th>${hourHeads.join('')}</tr></thead>
-      <tbody>${body}</tbody>
-    </table>
-    ${m.count ? '' : '<p class="muted" style="text-align:center">لا توجد محاضرات مجدولة</p>'}
-    <div class="print-foot"><span>تاريخ الإصدار: ${new Date().toLocaleDateString('ar-IQ')}</span></div>
   </div>`;
 }
 
 function buildPrintRoot(tables) {
   document.getElementById('print-root')?.remove();
-  const root = el(`<div id="print-root" dir="rtl">${tables.map((t) => tableHTML(tableModel(t.type, t.id))).join('')}</div>`);
+  const root = el(`<div id="print-root" dir="rtl">${tables.map((t, i) => tableHTML(tableModel(t.type, t.id), { page: i + 1, pages: tables.length })).join('')}</div>`);
   document.body.appendChild(root);
   return root;
 }
@@ -130,6 +245,26 @@ window.addEventListener('afterprint', () => {
 export function printTables(tables, title) {
   preparePrint(tables, title);
   window.print();
+}
+
+/** معاينة الصفحات كما ستُطبع تماماً، ومنها الحفظ كملف PDF أو الطباعة */
+export async function previewTables(tables, filename) {
+  const html = tables.map((t, i) => tableHTML(tableModel(t.type, t.id), { page: i + 1, pages: tables.length })).join('');
+  const body = el(`<div class="pv-wrap"><div class="pv-pages" dir="rtl">${html}</div></div>`);
+  const fit = () => {
+    const pages = body.querySelector('.pv-pages');
+    const sheet = pages.querySelector('.sheet');
+    if (sheet) pages.style.zoom = Math.min(1, (body.clientWidth - 24) / sheet.offsetWidth).toFixed(3);
+  };
+  requestAnimationFrame(fit);
+  window.addEventListener('resize', fit);
+  const v = await modal({
+    title: `👁 معاينة الطباعة — ${tables.length} ${tables.length === 1 ? 'صفحة' : tables.length === 2 ? 'صفحتان' : 'صفحات'}`, body, size: 'xl',
+    buttons: [{ label: '📄 حفظ PDF', value: 'pdf', cls: 'btn-primary' }, { label: '🖨 طباعة', value: 'print' }, { label: 'إغلاق', value: null }],
+  });
+  window.removeEventListener('resize', fit);
+  if (v === 'pdf') await savePDF(tables, filename);
+  else if (v === 'print') printTables(tables, filename);
 }
 
 const HINT_KEY = 'siraj-pdf-hint-hidden';
@@ -179,13 +314,13 @@ export async function exportPDF(tables, filename) {
   try {
     await Promise.race([document.fonts?.ready, new Promise((r) => setTimeout(r, 4000))]);
     const pdf = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4', compress: true });
-    const W = 297, H = 210, M = 6;
+    const W = 297, H = 210, M = 0; // كل جدول مصمم بحجم صفحة A4 كاملة
     const pages = [...root.querySelectorAll('.print-page')];
     for (let i = 0; i < pages.length; i++) {
       // كل جدول يُرسم كصورة عالية الدقة ويُضبط ليتسع للصفحة (مع تقسيمه إن كان أطول من صفحة)
       const canvas = await window.html2canvas(pages[i], {
         scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false,
-        scrollX: 0, scrollY: 0, windowWidth: Math.max(1200, document.documentElement.clientWidth),
+        scrollX: 0, scrollY: 0, windowWidth: Math.max(1240, document.documentElement.clientWidth),
       });
       if (!canvas.width || !canvas.height) throw new Error('صورة الجدول فارغة');
       const imgW = W - 2 * M;
@@ -221,106 +356,138 @@ export async function exportExcel(tables, filename) {
   wb.creator = UNIVERSITY;
   wb.created = new Date();
   const used = new Set();
-  const thin = { style: 'thin', color: { argb: 'FF9AA5B1' } };
-  const border = { top: thin, left: thin, bottom: thin, right: thin };
   const listRows = [];
+
+  const TNR = 'Times New Roman';
+  const argb = (hex) => `FF${hex.replace('#', '').toUpperCase()}`;
+  const plain = (html) => String(html).replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/[⁦-⁩]/g, '');
+  const clockRange = (a, b) => `من ${clock(a)} إلى ${clock(b)}`;
+  const white = { argb: 'FFFFFFFF' };
+  const gapLine = { style: 'thin', color: { argb: 'FFFFFFFF' } };
+  const gapBorder = { top: gapLine, left: gapLine, bottom: gapLine, right: gapLine };
 
   for (const t of tables) {
     const m = tableModel(t.type, t.id);
-    let name = m.header.title.replace(/[\\/*?:[\]]/g, ' ').slice(0, 28) || 'جدول';
+    const th = m.theme, p = m.print;
+    const fill = (hex) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb: argb(hex) } });
+    let name = plain(`${p.meta[0] || ''} ${p.org[2] || p.org[1] || ''}`).replace(/[\\/*?:[\]]/g, ' ').trim().slice(0, 28) || 'جدول';
     let n = 2; const baseName = name;
     while (used.has(name)) name = `${baseName.slice(0, 25)} ${n++}`;
     used.add(name);
     const ws = wb.addWorksheet(name, {
-      views: [{ rightToLeft: true, state: 'frozen', ySplit: 6, xSplit: 1 }],
-      pageSetup: { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true,
-        margins: { left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 } },
-      headerFooter: { oddFooter: '&Lصفحة &P من &N' },
+      properties: { tabColor: { argb: argb(th.main) } },
+      views: [{ rightToLeft: true, showGridLines: false }],
+      pageSetup: { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 1, horizontalCentered: true, verticalCentered: true,
+        margins: { left: 0.25, right: 0.25, top: 0.3, bottom: 0.3, header: 0.1, footer: 0.1 } },
     });
     const totalCols = 1 + m.slots.length;
-    const title = (row, text, size, fill) => {
+    const band = (row, value, { size = 12, bold = true, color = th.ink, bg = null, height = 22 } = {}) => {
       ws.mergeCells(row, 1, row, totalCols);
       const c = ws.getCell(row, 1);
-      c.value = text;
-      c.font = { name: 'Arial', size, bold: true, color: { argb: fill ? 'FFFFFFFF' : 'FF1F2937' } };
-      c.alignment = { horizontal: 'center', vertical: 'middle' };
-      if (fill) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } };
-      ws.getRow(row).height = size * 1.9;
+      c.value = value;
+      c.font = { name: TNR, size, bold, color: { argb: argb(color) } };
+      c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      if (bg) c.fill = fill(bg);
+      ws.getRow(row).height = height;
     };
-    title(1, [UNIVERSITY, collegeName(m.header.collegeId)].filter(Boolean).join(' — '), 14, 'FF0F4C81');
-    title(2, m.header.title, 13);
-    title(3, m.header.lines.filter(([, v]) => v !== '' && v != null).map(([k, v]) => `${k}: ${v}`).join('    |    '), 10);
+    band(1, p.org.join('  —  '), { size: 15, color: '#FFFFFF', bg: th.dark, height: 28 });
+    band(2, `${p.title}  —  ${plain(p.meta[0] || '')}`, { size: 18, bg: th.theory, height: 32 });
+    band(3, [plain(p.meta[1] || ''), p.year ? `العام الدراسي ${p.year}` : '', plain(p.sub)].filter(Boolean).join('   •   '), { size: 11.5, bold: false, color: '#3A464D', bg: th.theory, height: 20 });
+    ws.getCell(3, 1).border = { bottom: { style: 'medium', color: { argb: argb(th.accent) } } };
     ws.getRow(4).height = 6;
 
-    // ترويسة الساعات
+    // ترويسة الساعات: «من 8:30 إلى 9:30»
     const hr = 5;
-    ws.getCell(hr, 1).value = 'اليوم';
-    ws.mergeCells(hr, 1, hr + 1, 1);
-    const colsPerHour = 60 / m.step;
-    m.slots.forEach((slot, i) => {
-      const col = 2 + i;
-      ws.getCell(hr + 1, col).value = formatTime(slot);
-      if ((slot - m.from) % 60 === 0) {
-        const endCol = Math.min(col + colsPerHour - 1, totalCols);
-        ws.getCell(hr, col).value = `${formatTime(slot)}`;
-        if (endCol > col) ws.mergeCells(hr, col, hr, endCol);
-      }
-    });
-    for (const r of [hr, hr + 1]) {
-      ws.getRow(r).eachCell({ includeEmpty: true }, (c) => {
-        c.font = { name: 'Arial', bold: true, size: r === hr ? 10 : 8, color: { argb: 'FFFFFFFF' } };
-        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E6FB8' } };
-        c.alignment = { horizontal: 'center', vertical: 'middle' };
-        c.border = border;
-      });
+    const corner = ws.getCell(hr, 1);
+    corner.value = 'اليوم / الوقت';
+    corner.fill = fill(th.accent);
+    corner.font = { name: TNR, size: 11, bold: true, color: white };
+    const perHour = 60 / m.step;
+    for (let x = m.from, col = 2; x < m.to; x += 60, col += perHour) {
+      const endCol = Math.min(col + perHour - 1, totalCols);
+      const c = ws.getCell(hr, col);
+      c.value = clockRange(x, Math.min(x + 60, m.to));
+      if (endCol > col) ws.mergeCells(hr, col, hr, endCol);
+      c.fill = fill(th.main);
+      c.font = { name: TNR, size: 12, bold: true, color: white };
     }
-    ws.getColumn(1).width = 12;
-    for (let c = 2; c <= totalCols; c++) ws.getColumn(c).width = 60 / colsPerHour * 0.36 + 4;
+    ws.getRow(hr).eachCell({ includeEmpty: true }, (c) => { c.alignment = { horizontal: 'center', vertical: 'middle' }; c.border = gapBorder; });
+    ws.getRow(hr).height = 26;
+    ws.getColumn(1).width = 13;
+    for (let c = 2; c <= totalCols; c++) ws.getColumn(c).width = 34 / perHour;
 
-    let row = hr + 2;
+    let row = hr + 1;
+    const colOf = (min) => 2 + Math.round((min - m.from) / m.step);
     for (const r of m.rows) {
-      const rowStart = row;
-      ws.getRow(row).height = 62;
-      for (const s of r.items) {
-        const c1 = 2 + Math.round((Math.max(s.start, m.from) - m.from) / m.step);
-        const c2 = 1 + Math.round((Math.min(s.end, m.to) - m.from) / m.step);
+      ws.getRow(row).height = Math.max(54, 78 / Math.max(1, r.laneCount * 0.8));
+      let cur = m.from;
+      r.items.forEach((s, i) => {
+        const a = Math.max(s.start, cur);
+        if (i > 0 && r.laneCount === 1 && a - cur >= 30) {
+          const g1 = colOf(cur), g2 = colOf(a) - 1;
+          if (g2 > g1) ws.mergeCells(row, g1, row, g2);
+          const g = ws.getCell(row, g1);
+          g.value = `فترة حرة\n${clockRange(cur, a)}`;
+          g.font = { name: TNR, size: 10, bold: true, color: { argb: 'FF8A96A0' } };
+          g.fill = fill('#EEF1F4');
+          g.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        }
+        const c1 = colOf(a), c2 = colOf(Math.min(s.end, m.to)) - 1;
         if (c2 > c1) ws.mergeCells(row, c1, row, c2);
         const cell = ws.getCell(row, c1);
-        cell.value = sessionText(s, m.type).join('\n');
-        const hsl = colorFor(s.subjectId || s.title || s.id);
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: hslToArgb(hsl) } };
-        cell.font = { name: 'Arial', size: 9 };
+        const tone = s.kind === 'practical' ? th.accent : s.kind === 'external' ? '#6B5A8C' : th.main;
+        cell.value = { richText: [
+          { text: `${KIND_LABEL[s.kind] || 'نظري'}  |  ${clockRange(s.start, s.end)}\n`, font: { name: TNR, size: 10, bold: true, color: { argb: argb(tone) } } },
+          { text: `${subjectName(s)}\n`, font: { name: TNR, size: 12, bold: true, color: { argb: 'FF1B262C' } } },
+          { text: cardMeta(s, m.type).map(([k, v]) => `${k}: ${v || '—'}`).join('\n'), font: { name: TNR, size: 10, color: { argb: argb(th.ink) } } },
+        ] };
+        cell.fill = fill(s.kind === 'practical' ? th.practical : s.kind === 'external' ? '#F0ECF6' : th.theory);
         cell.alignment = { wrapText: true, horizontal: 'center', vertical: 'middle' };
-        listRows.push([m.header.title, DAY_NAMES[s.day], formatTime(s.start), formatTime(s.end), subjectName(s) + (s.kind === 'practical' ? ' (عملي)' : s.kind === 'external' ? ' (حجز)' : ' (نظري)'),
+        cell.border = { ...gapBorder, top: { style: 'thick', color: { argb: argb(tone) } } };
+        cur = Math.max(cur, Math.min(s.end, m.to));
+        listRows.push([plain(`${p.meta[0]} — ${p.org.slice(1).join(' — ')}`), DAY_NAMES[s.day], formatTime(s.start), formatTime(s.end), subjectName(s) + (s.kind === 'practical' ? ' (عملي)' : s.kind === 'external' ? ' (حجز)' : ' (نظري)'),
           teacherName(s.teacherId), roomName(s.roomId), (s.groupIds || []).map((g) => groupLabel(byId('groups', g), { withDept: true })).join(' + ')]);
+      });
+      for (let c = 2; c <= totalCols; c++) {
+        const x = ws.getCell(row, c);
+        if (!x.value && !x.isMerged) { x.fill = fill('#F3F5F7'); x.border = gapBorder; }
       }
       if (r.lane === 0) {
-        ws.getCell(row, 1).value = DAY_NAMES[r.day];
+        const d = ws.getCell(row, 1);
+        d.value = DAY_NAMES[r.day];
+        d.font = { name: TNR, size: 15, bold: true, color: white };
+        d.fill = fill(th.dark);
+        d.alignment = { horizontal: 'center', vertical: 'middle' };
+        d.border = { ...gapBorder, bottom: { style: 'medium', color: { argb: argb(th.accent) } } };
         if (r.laneCount > 1) ws.mergeCells(row, 1, row + r.laneCount - 1, 1);
       }
       row++;
-      if (rowStart) for (let c = 1; c <= totalCols; c++) ws.getCell(rowStart, c).border = border;
     }
-    for (let r = hr + 2; r < row; r++) {
-      const c = ws.getCell(r, 1);
-      c.font = { name: 'Arial', bold: true, size: 11 };
-      c.alignment = { horizontal: 'center', vertical: 'middle' };
-      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F0FA' } };
-    }
-    ws.getCell(row + 1, 1).value = `تاريخ الإصدار: ${new Date().toLocaleDateString('ar-IQ')}`;
-    ws.mergeCells(row + 1, 1, row + 1, totalCols);
-    ws.getCell(row + 1, 1).font = { name: 'Arial', size: 9, italic: true, color: { argb: 'FF6B7280' } };
-    ws.pageSetup.printArea = `A1:${colLetter(totalCols)}${row + 1}`;
+    // التذييل: تاريخ الإصدار والتوقيع
+    ws.getRow(row).height = 14;
+    const foot = row + 1;
+    const signFrom = Math.max(2, totalCols - Math.min(5, totalCols - 2));
+    ws.mergeCells(foot, 1, foot, Math.max(1, signFrom - 2));
+    ws.getCell(foot, 1).value = `تاريخ الإصدار: ${new Date().toLocaleDateString('ar-IQ')}`;
+    ws.getCell(foot, 1).font = { name: TNR, size: 9, color: { argb: 'FF8B959B' } };
+    ws.mergeCells(foot, signFrom, foot, totalCols);
+    const sign = ws.getCell(foot, signFrom);
+    sign.value = p.sign;
+    sign.font = { name: TNR, size: 13, bold: true, color: { argb: argb(th.ink) } };
+    sign.alignment = { horizontal: 'center', vertical: 'bottom' };
+    sign.border = { top: { style: 'thin', color: { argb: argb(th.accent) } } };
+    ws.getRow(foot).height = 26;
+    ws.pageSetup.printArea = `A1:${colLetter(totalCols)}${foot}`;
   }
 
   // ورقة القائمة التفصيلية
   const ls = wb.addWorksheet('قائمة المحاضرات', { views: [{ rightToLeft: true, state: 'frozen', ySplit: 1 }] });
   ls.addRow(['الجدول', 'اليوم', 'من', 'إلى', 'المادة', 'الأستاذ', 'القاعة', 'الشعب']);
   ls.getRow(1).eachCell((c) => {
-    c.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E6FB8' } };
+    c.font = { name: 'Times New Roman', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0D4A57' } };
   });
-  for (const r of listRows) ls.addRow(r);
+  for (const r of listRows) ls.addRow(r).font = { name: 'Times New Roman', size: 11 };
   [34, 10, 10, 10, 34, 24, 18, 40].forEach((w, i) => { ls.getColumn(i + 1).width = w; });
 
   const buf = await wb.xlsx.writeBuffer();
@@ -331,15 +498,4 @@ function colLetter(n) {
   let s = '';
   while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
   return s;
-}
-
-function hslToArgb(hsl) {
-  const [h, s, l] = hsl.match(/[\d.]+/g).map(Number);
-  const a = (s / 100) * Math.min(l / 100, 1 - l / 100);
-  const f = (n) => {
-    const k = (n + h / 30) % 12;
-    const c = l / 100 - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
-    return Math.round(c * 255).toString(16).padStart(2, '0');
-  };
-  return `FF${f(0)}${f(8)}${f(4)}`.toUpperCase();
 }

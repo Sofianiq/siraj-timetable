@@ -12,7 +12,7 @@ import {
   VIEW_TYPES, viewHeader, stageName, currentCollegeId, setCurrentCollege, managedColleges, deptsOfCollege, deptOptionsHTML,
   collegeName, collegeShort,
 } from '../model.js';
-import { exportPDF, exportExcel, printTables, savePDF, setPrintProvider } from '../export.js';
+import { exportPDF, exportExcel, printTables, savePDF, previewTables, setPrintProvider } from '../export.js';
 
 const state = {
   type: 'group', id: '', deptId: '',
@@ -99,10 +99,12 @@ export function renderSchedule(container, params = {}, { publicMode = false } = 
       <div class="dropdown">
         <button class="btn" id="expBtn">⬇ تصدير / طباعة</button>
         <div class="dropdown-menu" hidden>
+          <button data-exp="preview">👁 معاينة الطباعة — هذا الجدول</button>
           <button data-exp="pdf">📄 حفظ PDF — هذا الجدول</button>
           <button data-exp="xlsx">📊 Excel — هذا الجدول</button>
           <button data-exp="print">🖨 طباعة هذا الجدول</button>
           <hr>
+          <button data-exp="preview-all">👁 معاينة كل شعب ${state.type === 'college' ? 'الكلية' : 'القسم'}</button>
           <button data-exp="pdf-all">📄 حفظ PDF — كل شعب ${state.type === 'college' ? 'الكلية' : 'القسم'}</button>
           <button data-exp="xlsx-all">📊 Excel — كل شعب ${state.type === 'college' ? 'الكلية' : 'القسم'}</button>
           <button data-exp="print-all">🖨 طباعة كل شعب ${state.type === 'college' ? 'الكلية' : 'القسم'}</button>
@@ -263,7 +265,8 @@ export function renderSchedule(container, params = {}, { publicMode = false } = 
     const name = (state.type === 'college' ? `جداول ${collegeName(state.id)}`
       : allMode || state.type === 'dept' ? `جداول ${deptName(exportDeptId())}` : viewHeader(state.type, state.id).title).replace(/[\\/:*?"<>|]/g, '-');
     try {
-      if (kind.startsWith('pdfimg')) { toast('جارٍ إنشاء ملف PDF…'); await exportPDF(tables, name); }
+      if (kind.startsWith('preview')) await previewTables(tables, name);
+      else if (kind.startsWith('pdfimg')) { toast('جارٍ إنشاء ملف PDF…'); await exportPDF(tables, name); }
       else if (kind.startsWith('pdf')) await savePDF(tables, name);
       else if (kind.startsWith('xlsx')) { toast('جارٍ التجهيز…'); await exportExcel(tables, name); }
       else printTables(tables, name);

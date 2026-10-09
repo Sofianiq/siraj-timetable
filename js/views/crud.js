@@ -13,6 +13,7 @@ import {
   currentCollegeId, deptsOfCollege, deptOptionsHTML,
 } from '../model.js';
 import { collegeStructureOps } from '../seed/radiology.js';
+import { themeOptions, themeSwatch, themeKeyForDept } from '../themes.js';
 
 const EXCELJS = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
 
@@ -42,6 +43,7 @@ const ENTITIES = {
       { key: 'name', label: 'اسم الكلية', required: true, full: true, placeholder: 'مثال: كلية التمريض' },
       { key: 'short', label: 'الاسم المختصر', placeholder: 'مثال: التمريض' },
       { key: 'order', label: 'ترتيب الظهور', type: 'number', min: 1, default: managedColleges().length + 1 },
+      { key: 'theme', label: 'لون الجداول المطبوعة', type: 'select', options: themeOptions(), placeholder: 'تلقائي', help: 'يُستخدم لأقسام الكلية التي لم يُحدَّد لها لون خاص' },
       { key: 'own', label: 'النوع', type: 'checkbox', checkLabel: 'كلية مُدارة في النظام (لها أقسام وجداول). ألغِ التحديد لجهة خارجية تُستخدم للحجوزات فقط', default: true, full: true },
       { key: 'autoStructure', label: 'الهيكل', type: 'checkbox', createOnly: true, default: true, full: true,
         checkLabel: 'إنشاء «قسم عام» يمثل الكلية كاملة مع مراحله وشعبة صباحية لكل مرحلة (مناسب للكليات التي لا تقسم طلبتها إلى أقسام)' },
@@ -70,6 +72,7 @@ const ENTITIES = {
       { key: 'short', label: 'الاسم المختصر', placeholder: 'مثال: الأشعة' },
       { key: 'collegeId', label: 'الكلية', type: 'select', options: collegeOptions((c) => c.own !== false && canEditCollege(c.id)), required: true, default: defaultCollege() },
       { key: 'general', label: 'قسم عام', type: 'checkbox', checkLabel: 'يمثل الكلية كاملة (لا يظهر اسمه كقسم في الطباعة)' },
+      { key: 'theme', label: 'لون الجداول المطبوعة', type: 'select', options: themeOptions(), placeholder: 'تلقائي', help: 'لكل قسم لون مميز في PDF والطباعة وExcel. «تلقائي» يختار لوناً مختلفاً لكل قسم.' },
       { key: 'stagesCount', label: 'عدد المراحل الدراسية', type: 'number', min: 0, max: 6, default: 4, createOnly: true,
         help: 'تُنشأ المراحل مع شعبة «صباحي» لكل مرحلة، ويمكن تعديلها لاحقاً من صفحة «المراحل والشعب». اكتب 0 لعدم الإنشاء.' },
     ],
@@ -85,7 +88,7 @@ const ENTITIES = {
       }
       return [[{ op: 'set', col: 'departments', id: deptId, data: dept }], structure];
     },
-    columns: [['name', 'القسم'], ['short', 'مختصر'], [(r) => collegeName(r.collegeId), 'الكلية'],
+    columns: [['name', 'القسم'], ['short', 'مختصر'], [(r) => collegeName(r.collegeId), 'الكلية'], [(r) => themeSwatch(themeKeyForDept(r.id)), 'لون الطباعة', true],
       [(r) => store.data.stages.filter((g) => g.deptId === r.id).length, 'المراحل'],
       [(r) => store.data.groups.filter((g) => g.deptId === r.id).length, 'الشعب'],
       [(r) => store.data.subjects.filter((g) => g.deptId === r.id).length, 'المواد']],

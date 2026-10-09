@@ -73,6 +73,8 @@ export const DEFAULT_SETTINGS = {
   dayStart: 480,                  // 8:00
   dayEnd: 1200,                   // 20:00
   slotMinutes: 30,
+  printStart: 510,                // الجدول المطبوع: من 8:30
+  printEnd: 930,                  // إلى 3:30
   schemaVersion: SCHEMA_VERSION,
   shifts: { morning: { start: 480, end: 840 }, evening: { start: 840, end: 1200 } },
   maxTheoryBlock: 2,
