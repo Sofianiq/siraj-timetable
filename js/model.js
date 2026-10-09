@@ -121,6 +121,40 @@ export const VIEW_TYPES = {
   room: 'القاعة / المختبر',
 };
 
+/**
+ * محاضرات القسم غير المرتبطة بأي شعبة (بيانات قديمة أو مُدخلة قبل إنشاء الشعب).
+ * تُعرض وتُطبع في جدول خاص لكل مرحلة (حسب مرحلة المادة)، معرّفه «القسم|المرحلة».
+ */
+const isLoose = (s) => s.kind !== 'external' && !(s.groupIds || []).length;
+const looseLevel = (s) => String(byId('subjects', s.subjectId)?.stageLevel ?? '');
+const looseStage = (deptId, level) => store.data.stages.find((x) => x.deptId === deptId && String(x.level) === level) || (level ? { level: Number(level) } : null);
+
+export function looseKeys(deptId, term = currentTerm()) {
+  const levels = new Set(termSessions(term).filter((s) => s.deptId === deptId && isLoose(s)).map(looseLevel));
+  return [...levels].sort((a, b) => (Number(a) || 99) - (Number(b) || 99)).map((l) => `${deptId}|${l}`);
+}
+
+/** عنوان الجدول الخاص بمحاضرات بلا شعبة */
+export function looseLabel(id) {
+  const [deptId, level = ''] = String(id).split('|');
+  return `${level ? stageName(looseStage(deptId, level)) : 'مرحلة غير محددة'} — محاضرات غير مرتبطة بشعبة`;
+}
+
+/** جداول القسم بالترتيب: لكل مرحلة جداول شعبها، ثم جدول محاضراتها غير المرتبطة بشعبة إن وُجدت */
+export function deptTables(deptId) {
+  if (!deptId) return [];
+  const items = [
+    ...groupsSorted(deptId).map((g) => ({ level: Number(stageOf(g)?.level) || 0, t: { type: 'group', id: g.id } })),
+    ...looseKeys(deptId).map((id) => ({ level: Number(id.split('|')[1]) || 99, t: { type: 'loose', id } })),
+  ];
+  return items.sort((a, b) => a.level - b.level).map((x) => x.t);
+}
+
+/** جداول الكلية: جداول كل قسم بالترتيب */
+export function collegeTables(collegeId) {
+  return deptsOfCollege(collegeId).flatMap((d) => deptTables(d.id));
+}
+
 /** المحاضرات المطلوب عرضها لطريقة عرض ومعرّف */
 export function sessionsForView(type, id, term = currentTerm()) {
   const list = termSessions(term);
@@ -131,6 +165,10 @@ export function sessionsForView(type, id, term = currentTerm()) {
     case 'college': return list.filter((s) => s.deptId && collegeOfDept(s.deptId) === id);
     case 'teacher': return list.filter((s) => s.teacherId === id);
     case 'room': return list.filter((s) => s.roomId === id);
+    case 'loose': {
+      const [deptId, level = ''] = String(id).split('|');
+      return list.filter((s) => s.deptId === deptId && isLoose(s) && looseLevel(s) === level);
+    }
     default: return [];
   }
 }
@@ -158,6 +196,12 @@ export function viewHeader(type, id) {
     info.collegeId = collegeOfDept(id) || '';
     info.title = `الجدول العام — ${deptName(id)}`;
     info.lines = deptLine(id);
+  } else if (type === 'loose') {
+    const [deptId, level = ''] = String(id).split('|');
+    const d = byId('departments', deptId);
+    info.collegeId = d?.collegeId || '';
+    info.title = level ? `جدول ${stageName(looseStage(deptId, level))} — ${d?.name || ''}` : `محاضرات غير مرتبطة بشعبة — ${d?.name || ''}`;
+    info.lines = [...deptLine(deptId), ...(level ? [['المرحلة', stageName(looseStage(deptId, level))]] : [])];
   } else if (type === 'college') {
     info.collegeId = id;
     info.title = `الجدول العام — ${collegeName(id)}`;

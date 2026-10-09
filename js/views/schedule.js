@@ -8,7 +8,7 @@ import { renderGrid, renderList } from '../grid.js';
 import { esc, el, $, $$, modal, toast, confirmDialog } from '../ui.js';
 import { DAY_NAMES, SESSION_KINDS, SHIFTS, toHHMM, toMinutes, formatRange } from '../timeutil.js';
 import {
-  ctx, currentTerm, termSessions, sessionsForView, groupsSorted, groupLabel, deptName, sortByName,
+  ctx, currentTerm, termSessions, sessionsForView, groupsSorted, groupLabel, deptName, sortByName, deptTables, collegeTables, looseLabel,
   VIEW_TYPES, viewHeader, stageName, currentCollegeId, setCurrentCollege, managedColleges, deptsOfCollege, deptOptionsHTML,
   collegeName, collegeShort,
 } from '../model.js';
@@ -155,25 +155,24 @@ export function renderSchedule(container, params = {}, { publicMode = false } = 
   if (!state.id) {
     box.innerHTML = '<div class="empty-state">لا توجد بيانات للعرض. أضف البيانات الأساسية أولاً.</div>';
   } else if (state.type === 'dept' || state.type === 'college') {
-    // عرض القسم/الكلية: جدول لكل شعبة
-    const groups = state.type === 'dept' ? groupsSorted(state.id) : groupsSorted('', { collegeId: state.id });
-    if (!groups.length) box.innerHTML = `<div class="empty-state">لا توجد شعب في ${state.type === 'dept' ? 'هذا القسم' : 'هذه الكلية'}</div>`;
-    let lastDept = null;
-    for (const g of groups) {
-      if (state.type === 'college' && g.deptId !== lastDept) {
-        lastDept = g.deptId;
-        box.appendChild(el(`<h3 class="college-dept-title">${esc(deptName(g.deptId))}</h3>`));
+    // عرض القسم/الكلية: جدول لكل شعبة (وجدول لمحاضرات كل مرحلة غير المرتبطة بشعبة)، بنفس ترتيب الطباعة
+    const depts = state.type === 'dept' ? [byId('departments', state.id)].filter(Boolean) : deptsOfCollege(state.id);
+    let shown = 0;
+    for (const d of depts) {
+      const tables = deptTables(d.id);
+      if (!tables.length) continue;
+      if (state.type === 'college') box.appendChild(el(`<h3 class="college-dept-title">${esc(d.name)}</h3>`));
+      for (const t of tables) {
+        const sec = t.type === 'group'
+          ? el(`<section class="dept-section"><h3 class="dept-sec-title">${esc(groupLabel(byId('groups', t.id)))} <small class="muted">(${byId('groups', t.id)?.students || 0} طالب)</small></h3></section>`)
+          : el(`<section class="dept-section"><h3 class="dept-sec-title">${esc(looseLabel(t.id))}</h3>
+              ${editable ? '<p class="muted small">افتح المحاضرة واختر شعبتها ليظهر في جدول الشعبة ويُتحقق من تداخل محاضرات الطلبة.</p>' : ''}</section>`);
+        sec.appendChild(draw(sessionsForView(t.type, t.id), t.type));
+        box.appendChild(sec);
+        shown++;
       }
-      const sec = el(`<section class="dept-section"><h3 class="dept-sec-title">${esc(groupLabel(g))} <small class="muted">(${g.students || 0} طالب)</small></h3></section>`);
-      sec.appendChild(draw(sessionsForView('group', g.id), 'group'));
-      box.appendChild(sec);
     }
-    const loose = sessions.filter((s) => !(s.groupIds || []).length);
-    if (loose.length) {
-      const sec = el('<section class="dept-section"><h3 class="dept-sec-title">محاضرات غير مرتبطة بشعبة</h3></section>');
-      sec.appendChild(draw(loose, 'dept'));
-      box.appendChild(sec);
-    }
+    if (!shown) box.innerHTML = `<div class="empty-state">لا توجد شعب في ${state.type === 'dept' ? 'هذا القسم' : 'هذه الكلية'}.${editable ? ' أضف شعبة لكل مرحلة من صفحة <a href="#/stages">المراحل والشعب</a>.' : ''}</div>`;
   } else {
     box.appendChild(draw(sessions, state.type));
   }
@@ -239,24 +238,30 @@ export function renderSchedule(container, params = {}, { publicMode = false } = 
     } catch (e) { toast('تعذر الحفظ: ' + e.message, 'error'); rerender(); }
   }
 
+  /** جداول التصدير: الجدول المعروض، أو كل جداول القسم/الكلية (بما فيها محاضرات المراحل غير المرتبطة بشعبة) */
   function tablesForExport(all) {
-    if (!all) {
-      if (state.type === 'dept') return groupsSorted(state.id).map((g) => ({ type: 'group', id: g.id }));
-      if (state.type === 'college') return groupsSorted('', { collegeId: state.id }).map((g) => ({ type: 'group', id: g.id }));
-      return [{ type: state.type, id: state.id }];
-    }
-    if (state.type === 'college') return groupsSorted('', { collegeId: state.id }).map((g) => ({ type: 'group', id: g.id }));
-    const deptId = state.type === 'dept' ? state.id : state.type === 'group' ? byId('groups', state.id)?.deptId : state.deptId;
-    return groupsSorted(deptId).map((g) => ({ type: 'group', id: g.id }));
+    if (!all && state.type !== 'college' && state.type !== 'dept') return state.id ? [{ type: state.type, id: state.id }] : [];
+    const tables = state.type === 'college' ? collegeTables(state.id) : deptTables(exportDeptId());
+    // عند تصدير عدة جداول تُستبعد جداول الشعب الفارغة (إلا إذا كانت كلها فارغة: تُطبع نماذج فارغة)
+    const filled = tables.filter((t) => sessionsForView(t.type, t.id).length);
+    return filled.length ? filled : tables;
+  }
+  function exportDeptId() {
+    if (state.type === 'dept') return state.id;
+    if (state.type === 'group') return byId('groups', state.id)?.deptId;
+    return state.deptId;
   }
 
   async function doExport(kind) {
     menu.hidden = true;
     const allMode = kind.endsWith('-all');
     const tables = tablesForExport(allMode);
-    if (!tables.length || !tables[0].id) { toast('لا يوجد جدول للتصدير', 'warn'); return; }
+    if (!tables.length || !tables[0].id) {
+      toast(allMode && !exportDeptId() ? 'اختر القسم أولاً لتصدير كل جداوله' : 'لا توجد شعب أو محاضرات للتصدير. أضف شعبة لكل مرحلة من صفحة «المراحل والشعب».', 'warn', 7000);
+      return;
+    }
     const name = (state.type === 'college' ? `جداول ${collegeName(state.id)}`
-      : allMode ? `جداول ${deptName(byId('groups', tables[0].id)?.deptId)}` : viewHeader(state.type, state.id).title).replace(/[\\/:*?"<>|]/g, '-');
+      : allMode || state.type === 'dept' ? `جداول ${deptName(exportDeptId())}` : viewHeader(state.type, state.id).title).replace(/[\\/:*?"<>|]/g, '-');
     try {
       if (kind.startsWith('pdfimg')) { toast('جارٍ إنشاء ملف PDF…'); await exportPDF(tables, name); }
       else if (kind.startsWith('pdf')) await savePDF(tables, name);
@@ -324,7 +329,7 @@ export async function openEditor(session, defaults = {}) {
         <label class="chk small"><input type="checkbox" id="allSubjects"> عرض كل مواد القسم (كل المراحل والفصول)</label></div>
       <div class="field full" data-for="external"><label>الغرض / اسم النشاط <span class="req">*</span></label><input name="title" value="${esc(s.title || '')}" placeholder="مثال: محاضرة كلية الصيدلة"></div>
       <div class="field full" data-for="external"><label>الجهة الحاجزة</label><input name="bookedBy" value="${esc(s.bookedBy || '')}" placeholder="مثال: كلية الصيدلة — قسم ..."></div>
-      <div class="field full" data-for="normal"><label>الشعب / المجموعات</label><div class="checklist" id="groupsBox"></div>
+      <div class="field full" data-for="normal"><label>الشعب / المجموعات <span class="req">*</span></label><div class="checklist" id="groupsBox"></div>
         <small class="muted">اختر أكثر من شعبة لمحاضرة مشتركة (مثلاً النظري لكل شعب المرحلة).</small></div>
       <div class="field" data-for="normal"><label>الأستاذ</label><select name="teacherId"></select></div>
       <div class="field"><label>القاعة / المختبر</label><select name="roomId"></select></div>
@@ -370,9 +375,15 @@ export async function openEditor(session, defaults = {}) {
     const deptId = f('deptId').value;
     const chosen = new Set(currentGroups().length ? currentGroups() : s.groupIds || []);
     $('#groupsBox', body).innerHTML = groupsSorted(deptId).map((g) =>
-      `<label class="chk"><input type="checkbox" value="${g.id}" ${chosen.has(g.id) ? 'checked' : ''}> ${esc(groupLabel(g))} <small class="muted">(${g.students || 0})</small></label>`).join('') || '<span class="muted">لا توجد شعب</span>';
+      `<label class="chk"><input type="checkbox" value="${g.id}" ${chosen.has(g.id) ? 'checked' : ''}> ${esc(groupLabel(g))} <small class="muted">(${g.students || 0})</small></label>`).join('') || '<span class="muted">لا توجد شعب لهذا القسم. أضف شعبة لكل مرحلة من صفحة «المراحل والشعب».</span>';
   }
   const currentGroups = () => $$('#groupsBox input:checked', body).map((i) => i.value);
+  /** اقتراح شعب مرحلة المادة عندما لا تكون أي شعبة مختارة */
+  function suggestGroups(sub) {
+    if (!sub || currentGroups().length) return;
+    const stage = store.data.stages.find((x) => x.deptId === sub.deptId && Number(x.level) === Number(sub.stageLevel));
+    $$('#groupsBox input', body).forEach((i) => { i.checked = !!stage && byId('groups', i.value)?.stageId === stage.id; });
+  }
   /** الأساتذة مشتركون بين الكليات: أساتذة القسم أولاً ثم الكلية ثم بقية الكليات */
   function refreshTeachers() {
     const deptId = f('deptId').value;
@@ -413,13 +424,17 @@ export async function openEditor(session, defaults = {}) {
   function refreshIssues() {
     const v = { ...values(), id: s.id || '__new__' };
     const issues = checkSession(v, termSessions(), ctx());
-    $('#issues', body).innerHTML = issues.length
+    const noGroup = v.kind !== 'external' && !v.groupIds.length ? '<div class="issue warning">⚠️ اختر الشعبة التي تحضر هذه المحاضرة، ليظهر في جدولها ويُتحقق من تداخل محاضرات الطلبة.</div>' : '';
+    $('#issues', body).innerHTML = noGroup + (issues.length
       ? issues.map((i) => `<div class="issue ${i.level}">${i.level === 'error' ? '⛔' : '⚠️'} ${esc(i.message)}</div>`).join('')
-      : '<div class="issue ok">✓ لا توجد تعارضات</div>';
+      : '<div class="issue ok">✓ لا توجد تعارضات</div>');
     return issues;
   }
 
-  refreshKind(); refreshGroups(); refreshSubjects(); refreshTeachers(); refreshRooms();
+  refreshKind(); refreshGroups();
+  // محاضرة قديمة بلا شعبة: تُقترح شعب مرحلة مادتها
+  if (!isNew && !readOnly && s.kind !== 'external' && !(s.groupIds || []).length) suggestGroups(byId('subjects', s.subjectId));
+  refreshSubjects(); refreshTeachers(); refreshRooms();
   f('kind').onchange = () => { refreshKind(); refreshIssues(); };
   f('deptId').onchange = () => { refreshGroups(); refreshSubjects(); refreshTeachers(); refreshRooms(); refreshIssues(); };
   $('#allSubjects', body).onchange = () => refreshSubjects();
@@ -430,10 +445,7 @@ export async function openEditor(session, defaults = {}) {
       // اقتراح الأستاذ والشعب تلقائياً من بيانات المادة
       const tid = f('kind').value === 'practical' ? (sub.practicalTeacherId || sub.theoryTeacherId) : (sub.theoryTeacherId || sub.practicalTeacherId);
       if (tid && !f('teacherId').value) f('teacherId').value = tid;
-      if (!currentGroups().length) {
-        const stage = store.data.stages.find((x) => x.deptId === sub.deptId && Number(x.level) === Number(sub.stageLevel));
-        $$('#groupsBox input', body).forEach((i) => { i.checked = byId('groups', i.value)?.stageId === stage?.id; });
-      }
+      suggestGroups(sub);
     }
     refreshIssues();
   };
@@ -462,6 +474,10 @@ export async function openEditor(session, defaults = {}) {
         if (v.kind === 'external' && !v.title) throw new Error('اكتب غرض الحجز');
         if (v.kind === 'external' && !v.roomId) throw new Error('اختر القاعة المحجوزة');
         if (v.kind !== 'external' && !v.subjectId) throw new Error('اختر المادة');
+        if (v.kind !== 'external' && !v.groupIds.length) {
+          throw new Error(groupsSorted(v.deptId).length ? 'اختر الشعبة (أو الشعب) التي تحضر هذه المحاضرة'
+            : 'لا توجد شعب لهذا القسم. أضف شعبة للمرحلة من صفحة «المراحل والشعب» أولاً، ثم أضف المحاضرة.');
+        }
         if (v.kind !== 'external' && !canEditDept(v.deptId)) throw new Error('لا تملك صلاحية التعديل على هذا القسم');
         const issues = refreshIssues();
         if (val === 'dup') {

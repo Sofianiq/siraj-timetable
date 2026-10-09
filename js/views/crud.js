@@ -70,7 +70,21 @@ const ENTITIES = {
       { key: 'short', label: 'الاسم المختصر', placeholder: 'مثال: الأشعة' },
       { key: 'collegeId', label: 'الكلية', type: 'select', options: collegeOptions((c) => c.own !== false && canEditCollege(c.id)), required: true, default: defaultCollege() },
       { key: 'general', label: 'قسم عام', type: 'checkbox', checkLabel: 'يمثل الكلية كاملة (لا يظهر اسمه كقسم في الطباعة)' },
+      { key: 'stagesCount', label: 'عدد المراحل الدراسية', type: 'number', min: 0, max: 6, default: 4, createOnly: true,
+        help: 'تُنشأ المراحل مع شعبة «صباحي» لكل مرحلة، ويمكن تعديلها لاحقاً من صفحة «المراحل والشعب». اكتب 0 لعدم الإنشاء.' },
     ],
+    customCreate: (data) => {
+      const { stagesCount, ...dept } = data;
+      const deptId = uid();
+      const structure = [];
+      const n = Math.min(6, Math.max(0, Number(stagesCount) || 0));
+      for (let level = 1; level <= n; level++) {
+        const stageId = uid();
+        structure.push({ op: 'set', col: 'stages', id: stageId, data: { deptId, level, name: `المرحلة ${STAGE_NAMES[level]}` } });
+        structure.push({ op: 'set', col: 'groups', id: uid(), data: { deptId, stageId, shift: 'morning', name: 'صباحي', students: 0 } });
+      }
+      return [[{ op: 'set', col: 'departments', id: deptId, data: dept }], structure];
+    },
     columns: [['name', 'القسم'], ['short', 'مختصر'], [(r) => collegeName(r.collegeId), 'الكلية'],
       [(r) => store.data.stages.filter((g) => g.deptId === r.id).length, 'المراحل'],
       [(r) => store.data.groups.filter((g) => g.deptId === r.id).length, 'الشعب'],
@@ -220,7 +234,11 @@ export async function editEntity(col, row, preset = {}) {
       let data = readForm(form, fields);
       if (E.beforeSave) data = E.beforeSave(data);
       if (!E.canEdit(data)) throw new Error('لا تملك صلاحية الحفظ في هذا القسم أو الكلية');
-      if (!row && E.customCreate) await batchWrite(E.customCreate(data));
+      // customCreate يعيد عمليات، أو مراحل متتالية من العمليات (قواعد الأمان تتحقق من القسم بعد إنشائه)
+      if (!row && E.customCreate) {
+        const ops = E.customCreate(data);
+        for (const phase of Array.isArray(ops[0]) ? ops : [ops]) if (phase.length) await batchWrite(phase);
+      }
       else await batchWrite([{ op: row ? 'update' : 'set', col, id: row?.id || uid(), data }]);
       toast('تم الحفظ', 'success');
       return true;
@@ -360,6 +378,8 @@ export function renderStages(container) {
     { key: 'level', label: 'رقم المرحلة', type: 'select', options: stageLevelOptions(), required: true },
     { key: 'name', label: 'الاسم المعروض', placeholder: 'مثال: المرحلة الأولى' },
   ];
+  const newStageFields = [...stageFields,
+    { key: 'withGroup', label: 'الشعبة', type: 'checkbox', default: true, full: true, checkLabel: 'إنشاء شعبة «صباحي» لهذه المرحلة تلقائياً (المحاضرات تُسند إلى الشعب)' }];
   const groupFields = [
     { key: 'name', label: 'اسم الشعبة/المجموعة', required: true, placeholder: 'مثال: أ أو صباحي' },
     { key: 'shift', label: 'نوع الدراسة', type: 'select', options: Object.entries(SHIFTS).map(([value, label]) => ({ value, label })), required: true, default: 'morning' },
@@ -370,8 +390,13 @@ export function renderStages(container) {
     await modal({ title, body: form, buttons: [{ label: 'حفظ', value: 1, cls: 'btn-primary' }, { label: 'إلغاء', value: null }],
       onButton: async (v) => { if (!v) return true; await save(readForm(form, fields)); toast('تم الحفظ', 'success'); return true; } });
   };
-  $('#addStage', page)?.addEventListener('click', () => edit('إضافة مرحلة', stageFields, { level: stages.length + 1 }, (v) =>
-    batchWrite([{ op: 'set', col: 'stages', id: uid(), data: { deptId, level: Number(v.level), name: v.name || `المرحلة ${STAGE_NAMES[v.level]}` } }])));
+  $('#addStage', page)?.addEventListener('click', () => edit('إضافة مرحلة', newStageFields, { level: stages.length + 1, withGroup: true }, (v) => {
+    const stageId = uid();
+    return batchWrite([
+      { op: 'set', col: 'stages', id: stageId, data: { deptId, level: Number(v.level), name: v.name || `المرحلة ${STAGE_NAMES[v.level]}` } },
+      ...(v.withGroup ? [{ op: 'set', col: 'groups', id: uid(), data: { deptId, stageId, shift: 'morning', name: 'صباحي', students: 0 } }] : []),
+    ]);
+  }));
 
   page.addEventListener('click', async (e) => {
     const card = e.target.closest('[data-stage]');

@@ -38,3 +38,52 @@ test('college structure creates a general department with stages and groups', ()
   assert.equal(data.stages.length, 4);
   assert.equal(data.groups.length, 4);
 });
+
+test('v3 migration: external Pharmacy becomes managed, duplicate Dentistry merges, group-less stages and sessions are fixed', () => {
+  const v2 = {
+    settings: [{ id: 'app', schemaVersion: 2 }],
+    colleges: [
+      { id: 'hmt', name: COLLEGE_NAME, own: true },
+      { id: 'phx', name: 'كلية الصيدلة', own: false, order: 99 },
+      { id: 'dnx', name: 'كلية طب الاسنان', own: false, order: 99 },
+      { id: 'dn', name: 'كلية طب الأسنان', own: true, order: 3 },
+    ],
+    departments: [{ id: 'an', name: 'قسم تقنيات التخدير', collegeId: 'hmt' }, { id: 'dg', name: 'طب الأسنان', collegeId: 'dn', general: true }],
+    stages: [{ id: 'an1', deptId: 'an', level: 1 }, { id: 'an2', deptId: 'an', level: 2 }, { id: 'dg1', deptId: 'dg', level: 1 }],
+    groups: [{ id: 'dg1g', deptId: 'dg', stageId: 'dg1' }],
+    subjects: [{ id: 'sub2', deptId: 'an', stageLevel: 2 }],
+    rooms: [{ id: 'r1', name: 'قاعة الفلوجة', collegeId: 'dnx' }, { id: 'r2', name: 'قاعة السراج', collegeId: 'phx' }],
+    sessions: [
+      { id: 's1', deptId: 'an', subjectId: 'sub2', kind: 'theory', groupIds: [] },
+      { id: 's2', deptId: 'an', subjectId: 'missing', kind: 'theory', groupIds: [] },
+      { id: 's3', kind: 'external', groupIds: [] },
+    ],
+  };
+  const ops = migrationOps(v2, ids());
+  const find = (col, id) => ops.filter((o) => o.col === col && o.id === id);
+  // الصيدلة تتحول إلى كلية مُدارة بقسم عام ومراحل وشعب، وتبقى قاعتها مرتبطة بها
+  assert.equal(find('colleges', 'phx')[0].data.own, true);
+  const phDept = ops.find((o) => o.col === 'departments' && o.data.collegeId === 'phx');
+  assert.ok(phDept?.data.general);
+  assert.equal(ops.filter((o) => o.col === 'stages' && o.data.deptId === phDept.id).length, 5);
+  // نسخة طب الأسنان المكررة تُدمج: قاعتها تنتقل إلى الكلية المُدارة ثم تُحذف
+  assert.deepEqual(find('rooms', 'r1')[0].data, { collegeId: 'dn' });
+  assert.deepEqual(find('colleges', 'dnx').map((o) => o.op), ['delete']);
+  assert.ok(!find('rooms', 'r2').length);
+  assert.ok(!ops.some((o) => o.op === 'delete' && o.col !== 'colleges'));
+  // شعبة «صباحي» لكل مرحلة بلا شعب فقط
+  const newGroups = ops.filter((o) => o.col === 'groups' && o.data.deptId === 'an');
+  assert.deepEqual(newGroups.map((o) => o.data.stageId).sort(), ['an1', 'an2']);
+  assert.ok(!ops.some((o) => o.col === 'groups' && o.data.stageId === 'dg1'));
+  // المحاضرة تُربط بشعبة مرحلة مادتها، وما لا يمكن تحديده يبقى كما هو
+  const g2 = newGroups.find((o) => o.data.stageId === 'an2').id;
+  assert.deepEqual(find('sessions', 's1')[0].data, { groupIds: [g2] });
+  assert.ok(!find('sessions', 's2').length && !find('sessions', 's3').length);
+  assert.ok(ops.some((o) => o.col === 'settings' && o.data.schemaVersion === SCHEMA_VERSION));
+});
+
+test('fresh seed gives every stage at least one group', () => {
+  const data = toData(seedOps(ids()));
+  const without = data.stages.filter((st) => !data.groups.some((g) => g.stageId === st.id));
+  assert.equal(without.length, 0);
+});

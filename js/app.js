@@ -8,7 +8,7 @@ import { renderSchedule } from './views/schedule.js';
 import { renderEntity, renderStages } from './views/crud.js';
 import { renderGenerate } from './views/generate.js';
 import { renderDashboard, renderConflicts, renderUsers, renderSettings, renderLogin, ROLE_NAMES } from './views/pages.js';
-import { seedOps, migrationOps } from './seed/radiology.js';
+import { seedOps, migrationPlan } from './seed/radiology.js';
 import { deptName, collegeShort, managedColleges, currentCollegeId, setCurrentCollege } from './model.js';
 import { setPrintProvider } from './export.js';
 
@@ -211,17 +211,17 @@ async function autoSeed() {
   } catch (e) { console.error(e); toast('تعذر إدراج البيانات الأولية: ' + e.message, 'error'); }
 }
 
-/** ترقية البيانات الموجودة إلى نظام الكليات المتعددة (مرة واحدة، بواسطة مدير النظام) */
+/** ترقية البيانات الموجودة إلى الإصدار الحالي (مرة واحدة، بواسطة مدير النظام) */
 let migrating = false;
 async function autoMigrate() {
   if (migrating || !isAdmin()) return;
-  const ops = migrationOps(store.data, uid);
+  const { ops, notes } = migrationPlan(store.data, uid);
   if (!ops.length) return;
   migrating = true;
   try {
     await batchWrite(ops);
-    toast('تم تحديث النظام لدعم عدة كليات، وأُضيفت كليتا الصيدلة وطب الأسنان.', 'success', 8000);
-  } catch (e) { console.error(e); migrating = false; toast('تعذر تحديث بيانات الكليات: ' + e.message, 'error'); }
+    toast(`تم تحديث بيانات النظام${notes.length ? `: ${notes.join('، ')}` : ''}.`, 'success', 10000);
+  } catch (e) { console.error(e); migrating = false; toast('تعذر تحديث بيانات النظام: ' + e.message, 'error'); }
 }
 
 /* ------------------------------ البدء ------------------------------ */

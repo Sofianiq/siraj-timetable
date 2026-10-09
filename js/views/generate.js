@@ -80,7 +80,7 @@ function scope(page) {
 function run(page) {
   const st = settings();
   const { deptIds, stages, groups, groupIds } = scope(page);
-  if (!groups.length) { toast('لا توجد شعب ضمن النطاق المحدد', 'warn'); return; }
+  if (!groups.length) { toast('لا توجد شعب ضمن النطاق المحدد. أضف شعبة لكل مرحلة من صفحة «المراحل والشعب» ثم أعد التوليد.', 'warn', 7000); return; }
   const term = currentTerm();
   const sem = Number(st.semester || 1);
   const all = termSessions(term);

@@ -18,7 +18,7 @@ export const EXTRA_COLLEGES = [
   { name: 'كلية طب الأسنان', short: 'طب الأسنان', order: 3, stages: 5 },
 ];
 export const OTHER_COLLEGES_NAME = 'جهات أخرى (خارج النظام)';
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const DEPARTMENTS = [
   { key: 'rad', name: 'قسم تقنيات الأشعة والسونار', short: 'الأشعة' },
@@ -116,20 +116,18 @@ export function seedOps(uid) {
   const deptIds = {};
   for (const d of DEPARTMENTS) deptIds[d.key] = put('departments', { name: d.name, short: d.short, collegeId });
 
-  // المراحل الأربع لكل قسم، ولقسم الأشعة شعبتان (صباحي + مسائي) لكل مرحلة
+  // المراحل الأربع لكل قسم مع شعبة صباحية لكل مرحلة، ولقسم الأشعة شعبتان (صباحي + مسائي)
   const stageIds = {};
   for (const d of DEPARTMENTS) {
     for (let level = 1; level <= 4; level++) {
       const sid = put('stages', { deptId: deptIds[d.key], level, name: `المرحلة ${['', 'الأولى', 'الثانية', 'الثالثة', 'الرابعة'][level]}` });
       stageIds[`${d.key}|${level}`] = sid;
-      if (d.key === 'rad') {
-        for (const shift of ['morning', 'evening']) {
-          put('groups', {
-            deptId: deptIds.rad, stageId: sid, shift,
-            name: shift === 'morning' ? 'صباحي' : 'مسائي',
-            students: RAD_STUDENTS[`${level}|${shift}`] || 0,
-          });
-        }
+      for (const shift of d.key === 'rad' ? ['morning', 'evening'] : ['morning']) {
+        put('groups', {
+          deptId: deptIds[d.key], stageId: sid, shift,
+          name: shift === 'morning' ? 'صباحي' : 'مسائي',
+          students: d.key === 'rad' ? RAD_STUDENTS[`${level}|${shift}`] || 0 : 0,
+        });
       }
     }
   }
@@ -150,25 +148,100 @@ export function seedOps(uid) {
   return ops;
 }
 
+/** توحيد كتابة الأسماء للمقارنة: «كلية طب الاسنان» = «كلية طب الأسنان» */
+export const normName = (v) => String(v || '').trim()
+  .replace(/[\u064B-\u0652\u0640]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/\s+/g, ' ');
+
 /**
- * ترقية بيانات موجودة من الإصدار الأول (كلية واحدة) إلى الإصدار الثاني (عدة كليات):
- * تُضاف كليتا الصيدلة وطب الأسنان إن لم تكونا موجودتين، ويُرتّب ظهور الكليات.
- * تُنفَّذ مرة واحدة فقط عند دخول المشرف العام.
+ * ترقية البيانات الموجودة إلى الإصدار الحالي. تُنفَّذ مرة واحدة فقط عند دخول مدير النظام.
+ * - الإصدار 2 (عدة كليات): تُضاف كليتا الصيدلة وطب الأسنان، ويُرتّب ظهور الكليات.
+ * - الإصدار 3: إذا كانت الصيدلة أو طب الأسنان مسجّلة سابقاً كـ«جهة خارجية» تُحوَّل إلى كلية مُدارة (وتُدمج النسخ المكررة)،
+ *   وتُنشأ شعبة «صباحي» لكل مرحلة ليس لها شعب، وتُربط المحاضرات غير المرتبطة بشعبة بشعبة مرحلة مادتها.
+ * @returns {{ops: object[], notes: string[]}}
  */
-export function migrationOps(data, uid) {
-  const s = data.settings.find((x) => x.id === 'app');
-  if (!s || (s.schemaVersion || 1) >= SCHEMA_VERSION) return [];
+export function migrationPlan(data, uid) {
+  const s = (data.settings || []).find((x) => x.id === 'app');
+  const version = s?.schemaVersion || 1;
+  if (!s || version >= SCHEMA_VERSION) return { ops: [], notes: [] };
   const ops = [];
-  const names = new Set(data.colleges.map((c) => String(c.name).trim()));
-  for (const c of data.colleges) {
-    if (c.name === COLLEGE_NAME) {
-      ops.push({ op: 'update', col: 'colleges', id: c.id, data: { own: true, order: c.order ?? 1, short: c.short || 'التقنيات الصحية' } });
-    } else if (c.own === false) {
-      const rename = c.name === 'كليات أخرى في الجامعة' ? { name: OTHER_COLLEGES_NAME } : {};
-      ops.push({ op: 'update', col: 'colleges', id: c.id, data: { ...rename, order: c.order ?? 99 } });
+  const notes = [];
+  const colleges = data.colleges || [];
+
+  const isExtra = (c) => EXTRA_COLLEGES.some((e) => normName(e.name) === normName(c.name));
+  if (version < 2) {
+    for (const c of colleges) {
+      if (c.name === COLLEGE_NAME) {
+        ops.push({ op: 'update', col: 'colleges', id: c.id, data: { own: true, order: c.order ?? 1, short: c.short || 'التقنيات الصحية' } });
+      } else if (c.own === false && !isExtra(c)) {
+        const rename = c.name === 'كليات أخرى في الجامعة' ? { name: OTHER_COLLEGES_NAME } : {};
+        ops.push({ op: 'update', col: 'colleges', id: c.id, data: { ...rename, order: c.order ?? 99 } });
+      }
     }
   }
-  for (const c of EXTRA_COLLEGES) if (!names.has(c.name)) ops.push(...collegeStructureOps(uid, c).ops);
+
+  // الكليات الإضافية: إنشاء، أو تحويل «جهة خارجية» بالاسم نفسه إلى كلية مُدارة، ودمج النسخ المكررة
+  const depts = [...(data.departments || [])];
+  const stages = [...(data.stages || [])];
+  const groups = [...(data.groups || [])];
+  const put = (col, row, id = uid()) => { ops.push({ op: 'set', col, id, data: row }); return id; };
+  for (const extra of EXTRA_COLLEGES) {
+    const same = colleges.filter((c) => normName(c.name) === normName(extra.name));
+    let target = same.find((c) => c.own !== false);
+    if (!target && same.length) {
+      target = same[0];
+      ops.push({ op: 'update', col: 'colleges', id: target.id, data: { own: true, order: extra.order, short: target.short || extra.short } });
+      notes.push(`تحويل «${target.name}» إلى كلية مُدارة`);
+      if (!depts.some((d) => d.collegeId === target.id)) {
+        const deptId = put('departments', { name: extra.short, short: extra.short, collegeId: target.id, general: true });
+        depts.push({ id: deptId, collegeId: target.id });
+        for (let level = 1; level <= extra.stages; level++) {
+          const stageId = put('stages', { deptId, level, name: `المرحلة ${ORDINAL[level] || level}` });
+          stages.push({ id: stageId, deptId, level });
+          const gid = put('groups', { deptId, stageId, shift: 'morning', name: 'صباحي', students: 0 });
+          groups.push({ id: gid, deptId, stageId });
+        }
+      }
+    } else if (!target) {
+      ops.push(...collegeStructureOps(uid, extra).ops);
+      continue;
+    }
+    for (const dup of same.filter((c) => c !== target)) {
+      for (const r of (data.rooms || []).filter((x) => x.collegeId === dup.id)) ops.push({ op: 'update', col: 'rooms', id: r.id, data: { collegeId: target.id } });
+      for (const d of depts.filter((x) => x.collegeId === dup.id)) ops.push({ op: 'update', col: 'departments', id: d.id, data: { collegeId: target.id } });
+      for (const u of (data.users || []).filter((x) => x.collegeId === dup.id)) ops.push({ op: 'update', col: 'users', id: u.id, data: { collegeId: target.id } });
+      ops.push({ op: 'delete', col: 'colleges', id: dup.id });
+      notes.push(`دمج «${dup.name}» المكررة مع «${target.name}»`);
+    }
+  }
+
+  if (version < 3) {
+    // شعبة افتراضية لكل مرحلة بلا شعب (المحاضرات والتوليد والطباعة تعتمد على الشعب)
+    let added = 0;
+    for (const st of stages) {
+      if (groups.some((g) => g.stageId === st.id)) continue;
+      const gid = put('groups', { deptId: st.deptId, stageId: st.id, shift: 'morning', name: 'صباحي', students: 0 }, `g${st.id}`);
+      groups.push({ id: gid, deptId: st.deptId, stageId: st.id });
+      added++;
+    }
+    if (added) notes.push(`إنشاء شعبة «صباحي» لـ${added} مرحلة لم تكن لها شعب`);
+
+    // ربط المحاضرات غير المرتبطة بشعبة بشعبة مرحلة مادتها (عندما تكون للمرحلة شعبة واحدة فقط)
+    const subjects = new Map((data.subjects || []).map((x) => [x.id, x]));
+    let linked = 0;
+    for (const ses of data.sessions || []) {
+      if (ses.kind === 'external' || !ses.deptId || (ses.groupIds || []).length) continue;
+      const sub = subjects.get(ses.subjectId);
+      const st = sub && stages.find((x) => x.deptId === ses.deptId && Number(x.level) === Number(sub.stageLevel));
+      const gs = st ? groups.filter((g) => g.stageId === st.id) : [];
+      if (gs.length !== 1) continue;
+      ops.push({ op: 'update', col: 'sessions', id: ses.id, data: { groupIds: [gs[0].id] } });
+      linked++;
+    }
+    if (linked) notes.push(`ربط ${linked} محاضرة بشعبة مرحلتها`);
+  }
+
   ops.push({ op: 'update', col: 'settings', id: 'app', data: { schemaVersion: SCHEMA_VERSION } });
-  return ops;
+  return { ops, notes };
 }
+
+export const migrationOps = (data, uid) => migrationPlan(data, uid).ops;
