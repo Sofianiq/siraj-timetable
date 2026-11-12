@@ -1,7 +1,7 @@
 /**
  * نقطة البداية: تهيئة البيانات، الهيكل العام للصفحة، التنقل بين الصفحات، وإعادة الرسم عند أي تغيير (مزامنة فورية).
  */
-import { store, initStore, onChange, onAuth, role, isAdmin, canEdit, batchWrite, uid, signOut } from './store.js';
+import { store, initStore, onChange, onAuth, role, isAdmin, canEdit, batchWrite, uid, signOut, hasFirebase, fetchFirebaseBackup, importAll } from './store.js';
 import { APP_TITLE, APP_NAME, DEVELOPER, UNIVERSITY } from './branding.js';
 import { esc, el, $, $$, toast } from './ui.js';
 import { renderSchedule } from './views/schedule.js';
@@ -123,7 +123,9 @@ function updateSync() {
   if (store.mode === 'local') { s.className = 'sync local'; s.textContent = 'وضع تجريبي محلي'; s.title = 'البيانات محفوظة على هذا الجهاز فقط. اربط Supabase أو Firebase للعمل التشاركي.'; return; }
   const on = navigator.onLine;
   s.className = `sync ${on ? 'on' : 'off'}`;
-  s.title = store.mode === 'supabase' ? 'قاعدة البيانات: Supabase' : 'قاعدة البيانات: Firebase';
+  s.title = store.mode === 'supabase' ? 'قاعدة البيانات: Supabase'
+    : store.sbPending ? 'قاعدة البيانات: Firebase (إعدادات Supabase موجودة لكن جداوله لم تُنشأ بعد: شغّل supabase/schema.sql في Supabase ← SQL Editor)'
+    : 'قاعدة البيانات: Firebase';
   s.textContent = on ? 'متزامن' : store.mode === 'supabase' ? 'غير متصل — انتظر عودة الاتصال قبل الحفظ' : 'غير متصل — ستُرفع التعديلات عند عودة الاتصال';
 }
 
@@ -206,6 +208,23 @@ async function autoSeed() {
   const empty = !store.data.departments.length && !store.data.subjects.length && !store.data.settings.length;
   if (!empty || !isAdmin()) return;
   seeded = true;
+  // قاعدة Supabase جديدة فارغة والنظام كان على Firebase: تُنقل البيانات تلقائياً بدل إدراج بيانات أولية
+  if (store.mode === 'supabase' && hasFirebase()) {
+    try {
+      toast('قاعدة بيانات Supabase فارغة: جارٍ نقل البيانات من Firebase…', 'info', 6000);
+      const backup = await fetchFirebaseBackup();
+      const total = Object.values(backup.data).reduce((n, rows) => n + rows.length, 0);
+      if (total) {
+        await importAll(backup);
+        toast(`تم نقل ${total} عنصراً من Firebase إلى Supabase. يسجّل بقية المستخدمين حسابات جديدة، ثم تمنحهم صلاحياتهم من صفحة المستخدمين.`, 'success', 12000);
+        return;
+      }
+    } catch (e) {
+      console.error(e);
+      toast('تعذر نقل البيانات من Firebase تلقائياً: ' + (e.message || e) + ' — استخدم زر النقل في صفحة الإعدادات.', 'error', 12000);
+      return;
+    }
+  }
   try {
     await batchWrite(seedOps(uid));
     toast('تم إدراج البيانات الأولية: ثلاث كليات وأقسامها ومراحلها، والمناهج الرسمية لأقسام كلية التقنيات الصحية والطبية مع الكادر التدريسي. راجع القاعات والمختبرات.', 'success', 8000);

@@ -82,10 +82,26 @@ export function myCollegeId() {
 
 /* ------------------------------ التهيئة ------------------------------ */
 export async function initStore() {
-  if (hasSupabase()) await initSupabase();
-  else if (hasFirebase()) await initFirebase();
+  if (hasSupabase()) {
+    try {
+      await initSupabase();
+      return;
+    } catch (e) {
+      // جداول Supabase لم تُنشأ بعد (لم يُشغَّل schema.sql): يستمر الموقع على Firebase بدل التوقف.
+      // أخطاء الاتصال لا تُحوِّل إلى Firebase حتى لا تتوزع التعديلات بين قاعدتين.
+      if (!(sbMissingSchema(e) && hasFirebase())) throw e;
+      console.warn('Supabase: الجداول غير موجودة بعد (شغّل supabase/schema.sql). يعمل النظام على Firebase مؤقتاً.', e);
+      store._sb = null;
+      store.sbPending = true;
+    }
+  }
+  if (hasFirebase()) await initFirebase();
   else initLocal();
 }
+
+/** هل الخطأ يعني أن جداول النظام غير موجودة في Supabase؟ */
+const sbMissingSchema = (e) => ['PGRST205', '42P01'].includes(e?.code) ||
+  (/tt_docs/.test(e?.message || '') && /(could not find|does not exist)/i.test(e?.message || ''));
 
 function initLocal() {
   store.mode = 'local';

@@ -33,6 +33,6 @@ export const DEVELOPER = 'سفيان محمد';
  * ملاحظة: anon key ليس سرياً؛ الحماية تتم عبر سياسات الأمان في schema.sql.
  */
 export const supabaseConfig = {
-  url: '',
-  anonKey: '',
+  url: 'https://echlslvqvdxlvlbhsluf.supabase.co',
+  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjaGxzbHZxdmR4bHZsYmhzbHVmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ0NzkzNDIsImV4cCI6MjExMDA1NTM0Mn0.7LSixiNizf4NdeAEKAS1o8eUY8UzmydPU7wnrGo9DFQ',
 };
