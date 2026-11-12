@@ -1,13 +1,10 @@
 /**
- * البيانات الأولية التي تُدرج تلقائياً عند أول تشغيل (قاعدة بيانات فارغة).
- *
- * مصدر مواد قسم تقنيات الأشعة والسونار: ملفات درجات القسم للعام 2025-2026 (الفصل الثاني، المرحلتان الأولى والثانية).
- * عدد الساعات النظرية/العملية المدرج هنا قيم افتراضية بحسب نوع المادة (المواد التي لها درجة عملي في كشوف الدرجات
- * أُعطيت ساعات عملية)، ويجب مراجعتها من صفحة «المواد الدراسية» أو استبدالها باستيراد ملف المناهج الرسمي (Excel).
- *
- * القاعات والمختبرات أمثلة يجب تعديلها لتطابق الواقع.
+ * البيانات الأولية التي تُدرج تلقائياً عند أول تشغيل (قاعدة بيانات فارغة): الكليات وأقسامها ومراحلها وشعبها،
+ * والمناهج الرسمية لأقسام كلية التقنيات الصحية والطبية مع الكادر التدريسي (js/seed/curriculum.js)،
+ * وقاعات ومختبرات نموذجية يجب تعديلها لتطابق الواقع.
  */
 import { normName } from '../text.js';
+import { curriculumImportPlan } from './curriculum.js';
 
 export { normName };
 export const COLLEGE_NAME = 'كلية التقنيات الصحية والطبية';
@@ -21,7 +18,7 @@ export const EXTRA_COLLEGES = [
   { name: 'كلية طب الأسنان', short: 'طب الأسنان', order: 3, stages: 5 },
 ];
 export const OTHER_COLLEGES_NAME = 'جهات أخرى (خارج النظام)';
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const DEPARTMENTS = [
   { key: 'rad', name: 'قسم تقنيات الأشعة والسونار', short: 'الأشعة' },
@@ -29,28 +26,6 @@ export const DEPARTMENTS = [
   { key: 'an', name: 'قسم تقنيات التخدير', short: 'التخدير' },
   { key: 'dt', name: 'قسم تقنيات صناعة الأسنان', short: 'صناعة الأسنان' },
   { key: 'cos', name: 'قسم تقنيات التجميل', short: 'التجميل' },
-];
-
-export const RAD_TEACHERS = [
-  { key: 'abdulrahman', name: 'د. عبد الرحمن عبد الاله' },
-  { key: 'younis', name: 'د. يونس عبد الستار' },
-];
-
-/** [المرحلة، الفصل، اسم المادة، نظري، عملي، نوع المختبر، مفتاح أستاذ النظري] */
-export const RAD_SUBJECTS = [
-  [1, 2, 'علم الفسلجة', 2, 2, 'مختبر فسلجة', 'abdulrahman'],
-  [1, 2, 'تشريح أجهزة الجسم', 2, 2, 'مختبر تشريح', null],
-  [1, 2, 'فيزياء الذرة', 2, 2, 'مختبر فيزياء', null],
-  [1, 2, 'البايولوجي الإشعاعي', 2, 2, 'مختبر أشعة', null],
-  [1, 2, 'أسس التمريض', 2, 2, 'مختبر تمريض', null],
-  [1, 2, 'اللغة العربية', 2, 0, '', null],
-  [1, 2, 'المصطلحات الطبية', 2, 0, '', null],
-  [2, 2, 'التشريح الشعاعي للرأس والأطراف العليا', 2, 2, 'مختبر أشعة', 'younis'],
-  [2, 2, 'تقنيات التصوير الشعاعي للأطراف العليا', 2, 3, 'مختبر أشعة', null],
-  [2, 2, 'فحوصات شعاعية للجهاز الصفراوي والتناسلي', 2, 2, 'مختبر أشعة', null],
-  [2, 2, 'تقنيات الأجهزة الشعاعية التقليدية', 2, 2, 'مختبر أشعة', null],
-  [2, 2, 'فيزياء التصوير المحوسب', 2, 2, 'مختبر حاسوب', null],
-  [2, 2, 'اللغة العربية', 2, 0, '', null],
 ];
 
 /** عدد الطلبة المعروف من كشوف الدرجات: مفتاح (مرحلة|دراسة) */
@@ -69,17 +44,20 @@ export const SAMPLE_ROOMS = [
   { name: 'مختبر التمريض', type: 'lab', labKind: 'مختبر تمريض', capacity: 35 },
 ];
 
+/** الدوام الرسمي للكلية: من 8:30 صباحاً إلى 2:30 ظهراً */
+export const WORK_HOURS = { start: 510, end: 870 };
+
 export const DEFAULT_SETTINGS = {
-  academicYear: '2025-2026',
-  semester: 2,
-  days: [1, 2, 3, 4, 5],          // الأحد → الخميس
-  dayStart: 480,                  // 8:00
-  dayEnd: 1200,                   // 20:00
+  academicYear: '2026-2027',
+  semester: 1,
+  days: [0, 1, 2, 3, 4],          // السبت → الأربعاء
+  dayStart: WORK_HOURS.start,     // 8:30
+  dayEnd: WORK_HOURS.end,         // 2:30
   slotMinutes: 30,
-  printStart: 510,                // الجدول المطبوع: من 8:30
-  printEnd: 930,                  // إلى 3:30
+  printStart: WORK_HOURS.start,   // الجدول المطبوع: من 8:30
+  printEnd: WORK_HOURS.end,       // إلى 2:30
   schemaVersion: SCHEMA_VERSION,
-  shifts: { morning: { start: 480, end: 840 }, evening: { start: 840, end: 1200 } },
+  shifts: { morning: { ...WORK_HOURS }, evening: { start: 870, end: 1200 } },
   maxTheoryBlock: 2,
   maxPracticalBlock: 3,
   maxDailyHours: 6,
@@ -137,17 +115,10 @@ export function seedOps(uid) {
     }
   }
 
-  const teacherIds = {};
-  for (const t of RAD_TEACHERS) teacherIds[t.key] = put('teachers', { name: t.name, deptId: deptIds.rad, availability: {} });
-
-  for (const [level, semester, name, th, pr, labType, tKey] of RAD_SUBJECTS) {
-    put('subjects', {
-      deptId: deptIds.rad, stageLevel: level, semester, name,
-      theoryHours: th, practicalHours: pr, labType,
-      theoryTeacherId: tKey ? teacherIds[tKey] : null, practicalTeacherId: null,
-      combineTheory: true, needsReview: true,
-    });
-  }
+  // المناهج الرسمية لأقسام كلية التقنيات (بساعاتها النظرية والعملية) والكادر التدريسي
+  const seeded = { colleges: [], departments: [], subjects: [], teachers: [] };
+  for (const o of ops) if (seeded[o.col]) seeded[o.col].push({ ...o.data, id: o.id });
+  ops.push(...curriculumImportPlan(seeded, uid).ops);
 
   for (const r of SAMPLE_ROOMS) put('rooms', { ...r, collegeId, building: 'بناية الكلية', sample: true });
   return ops;
@@ -156,6 +127,7 @@ export function seedOps(uid) {
 /**
  * ترقية البيانات الموجودة إلى الإصدار الحالي. تُنفَّذ مرة واحدة فقط عند دخول مدير النظام.
  * - الإصدار 2 (عدة كليات): تُضاف كليتا الصيدلة وطب الأسنان، ويُرتّب ظهور الكليات.
+ * - الإصدار 5: الدوام 8:30 – 2:30، وتصحيح المختبرات المسجّلة كقاعات، واستيراد المناهج الرسمية والكادر التدريسي لكلية التقنيات.
  * - الإصدار 4: كل كلية مُدارة من الكليتين بلا أقسام يُنشأ لها «قسم عام» بمراحله وشعبه (لإضافة الأساتذة والجداول).
  * - الإصدار 3: إذا كانت الصيدلة أو طب الأسنان مسجّلة سابقاً كـ«جهة خارجية» تُحوَّل إلى كلية مُدارة (وتُدمج النسخ المكررة)،
  *   وتُنشأ شعبة «صباحي» لكل مرحلة ليس لها شعب، وتُربط المحاضرات غير المرتبطة بشعبة بشعبة مرحلة مادتها.
@@ -167,6 +139,7 @@ export function migrationPlan(data, uid) {
   if (!s || version >= SCHEMA_VERSION) return { ops: [], notes: [] };
   const ops = [];
   const notes = [];
+  const settingsPatch = {};
   const colleges = data.colleges || [];
 
   const isExtra = (c) => EXTRA_COLLEGES.some((e) => normName(e.name) === normName(c.name));
@@ -247,7 +220,25 @@ export function migrationPlan(data, uid) {
     if (linked) notes.push(`ربط ${linked} محاضرة بشعبة مرحلتها`);
   }
 
-  ops.push({ op: 'update', col: 'settings', id: 'app', data: { schemaVersion: SCHEMA_VERSION } });
+  if (version < 5) {
+    // الدوام الرسمي 8:30 – 2:30 (أعمدة الجدول على الشاشة وفي الطباعة، والدوام الصباحي)
+    const shifts = { ...(s.shifts || {}), morning: { ...WORK_HOURS } };
+    if (!shifts.evening) shifts.evening = { start: 870, end: 1200 };
+    Object.assign(settingsPatch, { dayStart: WORK_HOURS.start, dayEnd: WORK_HOURS.end, printStart: WORK_HOURS.start, printEnd: WORK_HOURS.end, shifts });
+    notes.push('الدوام من 8:30 إلى 2:30');
+    // مختبر مسجّل كقاعة (يسبب تنبيه «ليست مختبراً» لكل محاضرة عملية فيه)
+    const labs = (data.rooms || []).filter((r) => r.type !== 'lab' && /^مختبر/.test(normName(r.name)));
+    for (const r of labs) ops.push({ op: 'update', col: 'rooms', id: r.id, data: { type: 'lab' } });
+    if (labs.length) notes.push(`تصحيح نوع ${labs.map((r) => `«${r.name}»`).join('، ')} إلى مختبر`);
+    // المناهج الرسمية والكادر التدريسي لكلية التقنيات الصحية والطبية
+    const imp = curriculumImportPlan(data, uid);
+    ops.push(...imp.ops);
+    if (imp.stats.added || imp.stats.updated) notes.push(`استيراد المناهج الرسمية: ${imp.stats.added} مادة جديدة وتحديث ${imp.stats.updated} مادة بالساعات النظرية والعملية`);
+    if (imp.stats.teachers) notes.push(`إضافة ${imp.stats.teachers} أستاذاً بدون تكرار`);
+  }
+
+  // تحديث واحد لوثيقة الإعدادات (لا تُكتب الوثيقة نفسها مرتين في الدفعة)
+  ops.push({ op: 'update', col: 'settings', id: 'app', data: { ...settingsPatch, schemaVersion: SCHEMA_VERSION } });
   return { ops, notes };
 }
 

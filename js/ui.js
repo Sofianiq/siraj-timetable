@@ -73,7 +73,7 @@ export function modal({ title, body, buttons = [{ label: 'إغلاق', value: nu
 
 export async function confirmDialog(message, { okLabel = 'تأكيد', danger = false } = {}) {
   const v = await modal({
-    title: 'تأكيد', body: `<p>${esc(message)}</p>`, size: 'sm',
+    title: 'تأكيد', body: `<p>${esc(message).replace(/\n/g, '<br>')}</p>`, size: 'sm',
     buttons: [{ label: okLabel, value: true, cls: danger ? 'btn-danger' : 'btn-primary' }, { label: 'إلغاء', value: false }],
   });
   return v === true;

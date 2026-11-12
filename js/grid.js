@@ -41,7 +41,9 @@ export function renderGrid(o) {
   // ترويسة الساعات
   const head = el('<div class="tt-row tt-head"><div class="tt-day"></div><div class="tt-track tt-hours"></div></div>');
   const hours = head.querySelector('.tt-hours');
-  for (let m = Math.ceil(o.dayStart / 60) * 60; m < o.dayEnd; m += 60) {
+  // خطوط الساعات تبدأ من بداية الدوام (8:30، 9:30…) كما في الجدول الرسمي
+  const firstLine = o.dayStart % 30 === 0 ? o.dayStart : Math.ceil(o.dayStart / 60) * 60;
+  for (let m = firstLine; m < o.dayEnd; m += 60) {
     hours.appendChild(el(`<div class="tt-hour" style="right:${pct(m)}%">${formatTime(m).replace(' ', '&nbsp;')}</div>`));
   }
   root.appendChild(head);
@@ -54,7 +56,7 @@ export function renderGrid(o) {
       <div class="tt-track" data-day="${day}" style="height:${count * LANE_H + 6}px"></div>
     </div>`);
     const track = row.querySelector('.tt-track');
-    for (let m = Math.ceil(o.dayStart / 60) * 60; m < o.dayEnd; m += 60) {
+    for (let m = firstLine; m < o.dayEnd; m += 60) {
       track.appendChild(el(`<div class="tt-line" style="right:${pct(m)}%"></div>`));
     }
     for (const s of items) track.appendChild(block(s, lanes.get(s.id)));

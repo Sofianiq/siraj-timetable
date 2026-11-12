@@ -3,7 +3,7 @@
  */
 import {
   store, byId, settings, batchWrite, set, isAdmin, canEdit, myDeptId, role, collegeOfDept,
-  signIn, signUp, signOut, resetPassword, exportAll, importAll, uid,
+  signIn, signUp, signOut, resetPassword, exportAll, importAll, uid, hasFirebase, fetchFirebaseBackup,
 } from '../store.js';
 import { checkAll } from '../conflicts.js';
 import { esc, el, $, $$, toast, confirmDialog, download, modal } from '../ui.js';
@@ -13,7 +13,7 @@ import {
   managedColleges, deptsOfCollege, deptOptionsHTML, collegeName, collegeShort, teachesIn, sharedInto,
 } from '../model.js';
 import { openEditor } from './schedule.js';
-import { seedOps } from '../seed/radiology.js';
+import { curriculumImportPlan } from '../seed/curriculum.js';
 
 export const ROLE_NAMES = {
   admin: 'مدير النظام (كل الكليات)', college: 'معاون عميد (كلية واحدة)', dept: 'مسؤول قسم', viewer: 'عرض فقط', guest: 'زائر',
@@ -149,7 +149,7 @@ export function renderUsers(container) {
   container.innerHTML = '';
   if (store.mode === 'local') {
     container.appendChild(el(`<div class="page"><div class="page-head"><h2>👥 المستخدمون والصلاحيات</h2></div>
-      <div class="banner warn">النظام يعمل حالياً في الوضع التجريبي المحلي. لتفعيل الحسابات والصلاحيات والعمل التشاركي اربط النظام بـ Firebase (راجع دليل النشر).</div></div>`));
+      <div class="banner warn">النظام يعمل حالياً في الوضع التجريبي المحلي. لتفعيل الحسابات والصلاحيات والعمل التشاركي اربط النظام بـ Supabase أو Firebase (راجع دليل النشر).</div></div>`));
     return;
   }
   const users = [...store.data.users].sort((a, b) => (a.email || '').localeCompare(b.email || ''));
@@ -203,7 +203,7 @@ export function renderUsers(container) {
 /* =============================== الإعدادات والنسخ الاحتياطي =============================== */
 export function renderSettings(container) {
   const s = { ...settings() };
-  const sh = s.shifts || { morning: { start: 480, end: 840 }, evening: { start: 840, end: 1200 } };
+  const sh = s.shifts || { morning: { start: 510, end: 870 }, evening: { start: 870, end: 1200 } };
   const days = new Set(s.days || [1, 2, 3, 4, 5]);
   container.innerHTML = '';
   const page = el(`<div class="page">
@@ -214,22 +214,26 @@ export function renderSettings(container) {
         <div class="field"><label>الفصل الدراسي الحالي</label><select id="sem">${Object.entries(SEMESTERS).map(([k, v]) => `<option value="${k}" ${Number(k) === Number(s.semester) ? 'selected' : ''}>${v}</option>`).join('')}</select>
           <small class="muted">لكل فصل جداول مستقلة. تغيير الفصل يعرض جداوله.</small></div>
         <div class="field full"><label>أيام الدوام</label><div class="checklist inline">${DAY_NAMES.map((d, i) => `<label class="chk"><input type="checkbox" name="day" value="${i}" ${days.has(i) ? 'checked' : ''}> ${d}</label>`).join('')}</div></div>
-        <div class="field"><label>بداية اليوم في الجدول</label><input type="time" id="ds" value="${toHHMM(s.dayStart ?? 480)}"></div>
-        <div class="field"><label>نهاية اليوم في الجدول</label><input type="time" id="de" value="${toHHMM(s.dayEnd ?? 1200)}"></div>
+        <div class="field"><label>بداية اليوم في الجدول</label><input type="time" id="ds" value="${toHHMM(s.dayStart ?? 510)}"></div>
+        <div class="field"><label>نهاية اليوم في الجدول</label><input type="time" id="de" value="${toHHMM(s.dayEnd ?? 870)}"></div>
         <div class="field"><label>الدوام الصباحي: من</label><input type="time" id="ms" value="${toHHMM(sh.morning.start)}"></div>
         <div class="field"><label>الدوام الصباحي: إلى</label><input type="time" id="me" value="${toHHMM(sh.morning.end)}"></div>
         <div class="field"><label>الدوام المسائي: من</label><input type="time" id="es" value="${toHHMM(sh.evening.start)}"></div>
         <div class="field"><label>الدوام المسائي: إلى</label><input type="time" id="ee" value="${toHHMM(sh.evening.end)}"></div>
         <div class="field"><label>الجدول المطبوع: من الساعة</label><input type="time" id="ps" value="${toHHMM(s.printStart ?? 510)}">
           <small class="muted">أعمدة الساعات في PDF والطباعة وExcel. تتسع تلقائياً لأي محاضرة خارجها.</small></div>
-        <div class="field"><label>الجدول المطبوع: إلى الساعة</label><input type="time" id="pe" value="${toHHMM(s.printEnd ?? 930)}"></div>
+        <div class="field"><label>الجدول المطبوع: إلى الساعة</label><input type="time" id="pe" value="${toHHMM(s.printEnd ?? 870)}"></div>
         <div class="field"><label>دقة تحريك الوقت (دقيقة)</label><select id="slot">${[5, 10, 15, 30, 60].map((m) => `<option ${m === (s.slotMinutes || 30) ? 'selected' : ''}>${m}</option>`).join('')}</select>
           <small class="muted">عند السحب والإفلات يُقرَّب الوقت لأقرب مضاعف لهذه القيمة.</small></div>
       </div>
       <div class="toolbar"><button class="btn btn-primary" id="save">حفظ الإعدادات</button></div>
     </div>
+    ${store.mode === 'supabase' && hasFirebase() ? `<div class="card migrate-card"><h3>🔄 نقل البيانات من Firebase إلى Supabase</h3>
+      <p>النظام مرتبط الآن بـ Supabase. هذه الخطوة تنسخ كل البيانات (الكليات، الأقسام، المراحل والشعب، الأساتذة، القاعات، المواد، المحاضرات، الإعدادات) من قاعدة Firebase القديمة إلى Supabase. حسابات المستخدمين لا تُنقل: يسجّل كل مستخدم حساباً جديداً، ثم تمنحه صلاحيته من صفحة «المستخدمون والصلاحيات».</p>
+      <div class="toolbar"><button class="btn btn-primary" id="fromFirebase">🔄 نقل البيانات من Firebase الآن</button></div>
+    </div>` : ''}
     <div class="card"><h3>💾 النسخ الاحتياطي</h3>
-      <p class="muted">البيانات محفوظة سحابياً في Firebase، ومع ذلك يُنصح بتنزيل نسخة احتياطية أسبوعياً وحفظها في مكان آمن (Google Drive مثلاً).</p>
+      <p class="muted">البيانات محفوظة سحابياً في ${store.mode === 'supabase' ? 'Supabase' : store.mode === 'firebase' ? 'Firebase' : 'هذا المتصفح فقط'}، ومع ذلك يُنصح بتنزيل نسخة احتياطية أسبوعياً وحفظها في مكان آمن (Google Drive مثلاً).</p>
       <div class="toolbar">
         <button class="btn btn-primary" id="backup">⬇ تنزيل نسخة احتياطية (JSON)</button>
         <label class="btn">⬆ استعادة من نسخة<input type="file" id="restore" accept=".json" hidden></label>
@@ -239,7 +243,7 @@ export function renderSettings(container) {
     <div class="card"><h3>أدوات</h3>
       <div class="toolbar">
         <button class="btn" id="copyTerm">📋 نسخ جداول فصل سابق إلى الفصل الحالي</button>
-        <button class="btn" id="seed">📥 إعادة إدراج البيانات الأولية (قسم الأشعة)</button>
+        <button class="btn" id="seed">📚 استيراد المناهج الرسمية والكادر (كلية التقنيات الصحية والطبية)</button>
         <button class="btn btn-danger-ghost" id="clearTerm">🗑 حذف كل محاضرات الفصل الحالي</button>
       </div>
     </div>
@@ -267,6 +271,23 @@ export function renderSettings(container) {
     await set('settings', 'app', data);
     toast('تم حفظ الإعدادات', 'success');
   };
+  $('#fromFirebase', page)?.addEventListener('click', async () => {
+    const btn = $('#fromFirebase', page);
+    btn.disabled = true;
+    try {
+      toast('جارٍ قراءة البيانات من Firebase…');
+      const backup = await fetchFirebaseBackup((c, n) => { btn.textContent = `⏳ ${c}: ${n}`; });
+      const counts = Object.entries(backup.data).map(([c, rows]) => `${c}: ${rows.length}`).join('، ');
+      const total = Object.values(backup.data).reduce((n, rows) => n + rows.length, 0);
+      if (!total) throw new Error('لم تُقرأ أي بيانات من Firebase');
+      if (!(await confirmDialog(`قُرئ من Firebase:\n${counts}\n\nستُستبدل كل بيانات Supabase الحالية بهذه البيانات. متابعة؟`, { okLabel: 'نقل', danger: true }))) return;
+      await importAll(backup);
+      toast(`تم نقل ${total} عنصراً إلى Supabase بنجاح`, 'success', 7000);
+    } catch (e) {
+      console.error(e);
+      toast('تعذر النقل: ' + (e.message || e), 'error', 8000);
+    } finally { btn.disabled = false; btn.textContent = '🔄 نقل البيانات من Firebase الآن'; }
+  });
   $('#backup', page).onclick = async () => {
     const json = exportAll();
     download(`نسخة_احتياطية_الجداول_${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(json, null, 1), 'application/json');
@@ -288,11 +309,14 @@ export function renderSettings(container) {
     await batchWrite(list.map((x) => ({ op: 'delete', col: 'sessions', id: x.id })));
     toast('تم الحذف', 'success');
   };
+  // استيراد آمن: يضيف المواد والأساتذة غير الموجودين فقط، ويحدّث ساعات المواد الموجودة بحسب الخطة الرسمية
   $('#seed', page).onclick = async () => {
-    if (!(await confirmDialog('سيتم إضافة الأقسام والمراحل ومواد قسم الأشعة والقاعات النموذجية من جديد (قد تتكرر إن كانت موجودة). متابعة؟'))) return;
-    const ops = seedOps(uid).filter((o) => !(o.col === 'settings' && store.data.settings.length));
+    const { ops, stats } = curriculumImportPlan(store.data, uid);
+    if (!ops.length) { toast('المناهج الرسمية والكادر مستوردة ومحدّثة مسبقاً', 'success'); return; }
+    const msg = `أقسام: ${stats.depts.join('، ') || '—'}.\nسيُضاف ${stats.added} مادة، ويُحدَّث ${stats.updated} مادة (الاسم الرسمي والساعات النظرية والعملية)، ويُضاف ${stats.teachers} أستاذاً غير موجود. لن يتكرر أي شيء موجود. متابعة؟`;
+    if (!(await confirmDialog(msg, { okLabel: 'استيراد' }))) return;
     await batchWrite(ops);
-    toast('تم الإدراج', 'success');
+    toast(`تم الاستيراد: ${stats.added} مادة جديدة، ${stats.updated} محدّثة، ${stats.teachers} أستاذاً`, 'success', 7000);
   };
   $('#copyTerm', page).onclick = async () => {
     const terms = [...new Set(store.data.sessions.map((x) => x.term || ''))].filter((t) => t !== currentTerm());
@@ -340,7 +364,11 @@ export function renderLogin(container) {
     const email = f.email.value.trim(), pw = f.password.value;
     try {
       if (mode === 'up') {
-        await signUp(email, pw, f.name.value.trim());
+        const res = await signUp(email, pw, f.name.value.trim());
+        if (res?.needsConfirm) {
+          toast('تم إنشاء الحساب. افتح رسالة التأكيد في بريدك الإلكتروني، ثم سجّل الدخول.', 'success', 9000);
+          return;
+        }
         toast('تم إنشاء الحساب. اطلب من معاون العميد منحك الصلاحية المناسبة.', 'success', 6000);
       } else await signIn(email, pw);
       location.hash = '#/';
@@ -360,6 +388,8 @@ function authError(e) {
   if (c.includes('weak-password')) return 'كلمة المرور ضعيفة (6 أحرف على الأقل)';
   if (c.includes('invalid-email')) return 'البريد الإلكتروني غير صالح';
   if (c.includes('network')) return 'تحقق من الاتصال بالإنترنت';
+  if (c.includes('email-not-confirmed')) return 'لم يُؤكَّد البريد بعد. افتح رسالة التأكيد في بريدك ثم سجّل الدخول';
+  if (c.includes('signup-disabled')) return 'إنشاء الحسابات معطّل في Supabase: فعّله من Authentication ← Sign In / Providers ← Email';
   return e.message || String(e);
 }
 

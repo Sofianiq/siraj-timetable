@@ -61,6 +61,8 @@ const ENTITIES = {
       { key: 'name', label: 'اسم الكلية', required: true, full: true, placeholder: 'مثال: كلية التمريض' },
       { key: 'short', label: 'الاسم المختصر', placeholder: 'مثال: التمريض' },
       { key: 'order', label: 'ترتيب الظهور', type: 'number', min: 1, default: managedColleges().length + 1 },
+      { key: 'logo', label: 'شعار الكلية (اختياري)', full: true, placeholder: 'رابط صورة، مثل: https://…/logo.png',
+        help: 'يظهر في ترويسة الجداول المطبوعة وملفات Excel. لكلية التقنيات الصحية والطبية شعارها مرفق مسبقاً.' },
       { key: 'theme', label: 'لون الجداول المطبوعة', type: 'select', options: themeOptions(), placeholder: 'تلقائي', help: 'يُستخدم لأقسام الكلية التي لم يُحدَّد لها لون خاص' },
       { key: 'own', label: 'النوع', type: 'checkbox', checkLabel: 'كلية مُدارة في النظام (لها أقسام وجداول). ألغِ التحديد لجهة خارجية تُستخدم للحجوزات فقط', default: true, full: true },
       { key: 'autoStructure', label: 'الهيكل', type: 'checkbox', createOnly: true, default: true, full: true,
@@ -354,7 +356,7 @@ async function editAvailability(t) {
   if (!ENTITIES.teachers.canEdit(t)) { toast('للعرض فقط', 'warn'); return; }
   const st = settings();
   const days = st.days?.length ? st.days : [1, 2, 3, 4, 5];
-  const from = st.dayStart ?? 480, to = st.dayEnd ?? 1200;
+  const from = st.dayStart ?? 510, to = st.dayEnd ?? 870;
   const hours = [];
   for (let m = from; m < to; m += 60) hours.push(m);
   const av = t.availability || {};

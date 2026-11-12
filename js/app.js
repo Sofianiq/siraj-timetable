@@ -120,10 +120,11 @@ function renderCollegeSwitch() {
 function updateSync() {
   const s = $('#sync');
   if (!s) return;
-  if (store.mode === 'local') { s.className = 'sync local'; s.textContent = 'وضع تجريبي محلي'; s.title = 'البيانات محفوظة على هذا الجهاز فقط. اربط Firebase للعمل التشاركي.'; return; }
+  if (store.mode === 'local') { s.className = 'sync local'; s.textContent = 'وضع تجريبي محلي'; s.title = 'البيانات محفوظة على هذا الجهاز فقط. اربط Supabase أو Firebase للعمل التشاركي.'; return; }
   const on = navigator.onLine;
   s.className = `sync ${on ? 'on' : 'off'}`;
-  s.textContent = on ? 'متزامن' : 'غير متصل — ستُرفع التعديلات عند عودة الاتصال';
+  s.title = store.mode === 'supabase' ? 'قاعدة البيانات: Supabase' : 'قاعدة البيانات: Firebase';
+  s.textContent = on ? 'متزامن' : store.mode === 'supabase' ? 'غير متصل — انتظر عودة الاتصال قبل الحفظ' : 'غير متصل — ستُرفع التعديلات عند عودة الاتصال';
 }
 
 function renderNav(active) {
@@ -207,7 +208,7 @@ async function autoSeed() {
   seeded = true;
   try {
     await batchWrite(seedOps(uid));
-    toast('تم إدراج البيانات الأولية: ثلاث كليات وأقسامها ومراحلها ومواد قسم تقنيات الأشعة والسونار. راجع الساعات والقاعات.', 'success', 8000);
+    toast('تم إدراج البيانات الأولية: ثلاث كليات وأقسامها ومراحلها، والمناهج الرسمية لأقسام كلية التقنيات الصحية والطبية مع الكادر التدريسي. راجع القاعات والمختبرات.', 'success', 8000);
   } catch (e) { console.error(e); toast('تعذر إدراج البيانات الأولية: ' + e.message, 'error'); }
 }
 
@@ -242,7 +243,7 @@ async function main() {
 
   onChange((col, info) => {
     // إشعار عند وصول تعديل من مستخدم آخر
-    if (col === 'sessions' && info.remote && info.changes?.length && store.mode === 'firebase') {
+    if (col === 'sessions' && info.remote && info.changes?.length && store.mode !== 'local') {
       const others = info.changes.filter((c) => c.data?.updatedBy && c.data.updatedBy !== (store.user?.name || store.user?.email));
       if (others.length) toast(`🔄 ${others.length === 1 ? 'تعديل جديد' : `${others.length} تعديلات جديدة`} من ${others[0].data.updatedBy}`, 'info', 2500);
     }

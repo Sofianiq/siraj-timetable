@@ -95,7 +95,7 @@ export function buildDemands({ subjects, stages, groups, settings, keptSessions,
   const demands = [];
   const maxT = options.maxTheoryBlock || 2;
   const maxP = options.maxPracticalBlock || 3;
-  const shifts = settings.shifts || { morning: { start: 480, end: 840 }, evening: { start: 840, end: 1200 } };
+  const shifts = settings.shifts || { morning: { start: 510, end: 870 }, evening: { start: 870, end: 1200 } };
 
   // الساعات المغطاة مسبقاً بمحاضرات ثابتة: مفتاح (مادة|نوع|شعب)
   const covered = new Map();

@@ -182,11 +182,22 @@ export function renderSchedule(container, params = {}, { publicMode = false } = 
     box.appendChild(draw(sessions, state.type));
   }
 
+  /** نطاق الساعات: الدوام من الإعدادات، ويتسع بساعات كاملة لأي محاضرة خارجه حتى لا تُقص */
+  function gridRange(list) {
+    let dayStart = st.dayStart ?? 510, dayEnd = st.dayEnd ?? 870;
+    if (dayEnd <= dayStart) dayEnd = dayStart + 360;
+    for (const s of list) {
+      while (s.start < dayStart) dayStart -= 60;
+      while (s.end > dayEnd) dayEnd += 60;
+    }
+    return { dayStart, dayEnd };
+  }
+
   function draw(list, viewType) {
     if (state.mode === 'list') return renderList({ sessions: list, viewType, days, conflicts, onOpen: (s) => openEditor(s) });
     return renderGrid({
       sessions: list, viewType, days,
-      dayStart: st.dayStart ?? 480, dayEnd: st.dayEnd ?? 1200, step: st.slotMinutes || 30,
+      ...gridRange(list), step: st.slotMinutes || 30,
       conflicts,
       canDrag: (s) => editable && canModify(s),
       onOpen: (s) => openEditor(s),
@@ -216,7 +227,7 @@ export function renderSchedule(container, params = {}, { publicMode = false } = 
   }
 
   function defaultsForView() {
-    const d = { kind: 'theory', day: days[0], start: st.shifts?.morning?.start ?? 480, end: (st.shifts?.morning?.start ?? 480) + 120, groupIds: [] };
+    const d = { kind: 'theory', day: days[0], start: st.shifts?.morning?.start ?? 510, end: (st.shifts?.morning?.start ?? 510) + 120, groupIds: [] };
     if (state.type === 'group') {
       const g = byId('groups', state.id);
       d.groupIds = g ? [g.id] : [];
@@ -349,7 +360,7 @@ export async function openEditor(session, defaults = {}) {
       <div class="field" data-for="normal"><label>الأستاذ</label><select name="teacherId"></select></div>
       <div class="field"><label>القاعة / المختبر</label><select name="roomId"></select></div>
       <div class="field"><label>اليوم</label><select name="day">${days.map((d) => `<option value="${d}" ${d === s.day ? 'selected' : ''}>${DAY_NAMES[d]}</option>`).join('')}</select></div>
-      <div class="field"><label>من الساعة</label><input type="time" name="start" step="${step * 60}" value="${toHHMM(s.start ?? 480)}"></div>
+      <div class="field"><label>من الساعة</label><input type="time" name="start" step="${step * 60}" value="${toHHMM(s.start ?? 510)}"></div>
       <div class="field"><label>إلى الساعة</label><input type="time" name="end" step="${step * 60}" value="${toHHMM(s.end ?? 600)}"></div>
       <div class="field"><label>&nbsp;</label><label class="chk"><input type="checkbox" name="locked" ${s.locked ? 'checked' : ''}> 🔒 تثبيت (لا يغيّرها التوليد التلقائي)</label></div>
       <div class="field full"><label>ملاحظة</label><input name="note" value="${esc(s.note || '')}"></div>

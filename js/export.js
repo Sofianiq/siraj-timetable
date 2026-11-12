@@ -7,7 +7,9 @@
  */
 import { DAY_NAMES, SHIFTS, formatTime, assignLanes } from './timeutil.js';
 import { esc, el, loadScript, download, modal, toast } from './ui.js';
-import { settings, byId, store } from './store.js';
+import { settings, byId, store, collegeOfDept } from './store.js';
+import { normName } from './text.js';
+import { HMT_COLLEGE } from './seed/curriculum.js';
 import { sessionsForView, viewHeader, subjectName, teacherName, roomName, groupLabel, collegeName, stageName } from './model.js';
 import { themeKeyForDept, themeKeyForCollege, themeOf } from './themes.js';
 import { subsOf, subgroupColor, subgroupLabel } from './subgroups.js';
@@ -34,6 +36,14 @@ function daysText(days) {
 }
 
 /** ترويسة الجدول المطبوع: الجهة (يمين)، العنوان (وسط)، المرحلة/الأستاذ/القاعة والفصل والعام (يسار)، ولون القسم */
+/** شعار كلية الجدول: حقل «الشعار» في صفحة الكليات، ولكلية التقنيات الصحية والطبية شعارها المرفق */
+export function collegeLogo(collegeId) {
+  const c = byId('colleges', collegeId);
+  if (!c) return '';
+  if (c.logo) return c.logo;
+  return normName(c.name) === normName(HMT_COLLEGE) ? 'assets/logo-hmt.png' : '';
+}
+
 function printInfo(type, id, days) {
   const st = settings();
   const info = { org: [UNIVERSITY], title: 'الجدول الأسبوعي للمحاضرات', meta: [], shift: '', theme: 'teal', sign: 'رئيس القسم' };
@@ -80,6 +90,12 @@ function printInfo(type, id, days) {
     info.sign = 'معاون العميد للشؤون العلمية';
   }
   info.org = info.org.filter(Boolean);
+  const cid = type === 'college' ? id
+    : type === 'room' ? byId('rooms', id)?.collegeId
+      : type === 'teacher' ? collegeOfDept(byId('teachers', id)?.deptId)
+        : type === 'group' ? collegeOfDept(byId('groups', id)?.deptId)
+          : collegeOfDept(String(id).split('|')[0]);
+  info.logo = collegeLogo(cid);
   info.meta.push(SEM_FULL[st.semester] || '');
   const [y1, y2] = String(st.academicYear || '').split(/[-–]/).map((x) => x.trim());
   info.year = y2 ? `${y1} – ${y2}` : y1 || '';
@@ -123,7 +139,7 @@ export function tableModel(type, id) {
   const st = settings();
   const days = st.days?.length ? st.days : [1, 2, 3, 4, 5];
   const sessions = sessionsForView(type, id).filter((s) => days.includes(s.day));
-  let from = st.printStart ?? 510, to = st.printEnd ?? 930;
+  let from = st.printStart ?? 510, to = st.printEnd ?? 870;
   if (to <= from) to = from + 420;
   for (const s of sessions) {
     while (s.start < from) from -= 60;
@@ -143,7 +159,8 @@ export function tableModel(type, id) {
     }
   }
   const print = printInfo(type, id, days);
-  return { type, id, header: viewHeader(type, id), print, theme: themeOf(print.theme), step, from, to, slots, rows, days, count: sessions.length };
+  return { type, id, header: viewHeader(type, id), print, theme: themeOf(print.theme), step, from, to, slots, rows, days, count: sessions.length,
+    hasSubgroups: type === 'group' && sessions.some((s) => subsOf(s).length) };
 }
 
 const KIND_LABEL = { theory: 'نظري', practical: 'عملي', external: 'حجز' };
@@ -157,7 +174,7 @@ function cardMeta(s, type) {
   if (type !== 'room') rows.push(['القاعة', roomName(s.roomId)]);
   if ((type === 'teacher' || type === 'room') && groups) rows.push(['الشعبة', groups]);
   if (s.kind === 'external' && s.bookedBy) rows.push(['الجهة', s.bookedBy]);
-  return rows;
+  return rows.filter(([, v]) => v);
 }
 
 /** خانة مكدّسة: مجاميع العملي في الوقت نفسه، لكل مجموعة سطر بلونها */
@@ -185,11 +202,13 @@ function cardHTML(s, m, span) {
   const g1 = byId('groups', s.groupIds?.[0]);
   const subTag = m.type === 'group' ? subsOf(s).map((x) => `<span class="sg-tag" style="--sg:${subgroupColor(g1, x)[0]}">${esc(x)}</span>`).join('') : '';
   const size = span * m.step <= 60 ? ' narrow' : span * m.step >= 180 ? ' wide' : '';
-  const meta = cardMeta(s, m.type).map(([k, v]) => `<div><span class="k">${esc(k)}:</span> <span class="v">${v ? esc(v) : '—'}</span></div>`).join('');
-  return `<td class="sc ${kind}${size}" colspan="${span}"><div class="cd">
+  const meta = cardMeta(s, m.type).map(([k, v]) => `<div><span class="k">${esc(k)}:</span> <span class="v">${esc(v)}</span></div>`).join('');
+  // اسم المادة الطويل في خانة ضيقة يُصغَّر خطه قليلاً بدل أن يلتف على أسطر كثيرة
+  const long = subjectName(s).length > span * (60 / m.step) * 9 ? ' long' : '';
+  return `<td class="sc ${kind}${size}${long}" colspan="${span}"><div class="cd">
     <div class="cd-top">${subTag}<span class="badge">${KIND_LABEL[s.kind] || 'نظري'}</span><span class="tm">${rangeHTML(s.start, s.end)}</span></div>
     <div class="cd-name">${esc(subjectName(s))}</div>
-    <div class="cd-meta">${meta}</div>
+    ${meta ? `<div class="cd-meta">${meta}</div>` : ''}
   </div></td>`;
 }
 
@@ -233,7 +252,7 @@ export function tableHTML(m, { page = 1, pages = 1 } = {}) {
   <div class="print-page sheet" style="${vars}">
     <div class="sh-frame">
       <header class="sh-head">
-        <div class="sh-org">${p.org.map((x, i) => `<div class="o${i}">${esc(x)}</div>`).join('')}</div>
+        <div class="sh-org">${p.logo ? `<img class="sh-logo" src="${esc(p.logo)}" alt="">` : ''}<div class="sh-org-t">${p.org.map((x, i) => `<div class="o${i}">${esc(x)}</div>`).join('')}</div></div>
         <div class="sh-title"><h1>${esc(p.title)}</h1><div class="sub">${p.sub}</div></div>
         <div class="sh-meta">${meta.map((x, i) => `<div class="m${i}">${p.metaHTML && i === 0 ? x : esc(x)}</div>`).join('')}
           ${p.year ? `<div class="yr">العام الدراسي <b>${esc(p.year)}</b></div>` : ''}</div>
@@ -246,6 +265,7 @@ export function tableHTML(m, { page = 1, pages = 1 } = {}) {
       ${m.count ? '' : '<div class="sh-none">لا توجد محاضرات مجدولة في هذا الجدول</div>'}
       <footer class="sh-foot">
         <div class="issued">تاريخ الإصدار: <span dir="ltr">${esc(new Date().toLocaleDateString('en-GB'))}</span>${pages > 1 ? ` &nbsp;•&nbsp; صفحة ${page} من ${pages}` : ''}</div>
+        <div class="legend"><span class="lg th"></span>نظري <span class="lg pr"></span>عملي${m.hasSubgroups ? ' <span class="lg sg"></span>مجاميع العملي' : ''}</div>
         <div class="sign"><div class="line"></div><div>${esc(p.sign)}</div></div>
       </footer>
     </div>
@@ -292,8 +312,18 @@ window.addEventListener('afterprint', () => {
   setTimeout(() => { if (savedTitle !== null) { document.title = savedTitle; savedTitle = null; } }, 1500);
 });
 
-export function printTables(tables, title) {
+/** انتظار تحميل الصور (شعار الكلية) قبل الطباعة أو الرسم، بحد أقصى ثانيتين */
+function imagesReady(root) {
+  const imgs = [...(root?.querySelectorAll('img') || [])].filter((i) => !i.complete);
+  if (!imgs.length) return Promise.resolve();
+  return Promise.race([Promise.all(imgs.map((i) => new Promise((r) => { i.onload = i.onerror = r; }))), new Promise((r) => setTimeout(r, 2000))]);
+}
+// تحميل الشعار مسبقاً ليظهر حتى عند الطباعة بـ Ctrl+P مباشرة
+try { new Image().src = 'assets/logo-hmt.png'; } catch { /* خارج المتصفح */ }
+
+export async function printTables(tables, title) {
   preparePrint(tables, title);
+  await imagesReady(document.getElementById('print-root'));
   window.print();
 }
 
@@ -363,6 +393,7 @@ export async function exportPDF(tables, filename) {
   window.scrollTo(0, 0);
   try {
     await Promise.race([document.fonts?.ready, new Promise((r) => setTimeout(r, 4000))]);
+    await imagesReady(root);
     const pdf = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4', compress: true });
     const W = 297, H = 210, M = 0; // كل جدول مصمم بحجم صفحة A4 كاملة
     const pages = [...root.querySelectorAll('.print-page')];
@@ -400,6 +431,7 @@ export async function exportPDF(tables, filename) {
 }
 
 /** Excel منسّق: ورقة لكل جدول + ورقة قائمة تفصيلية */
+const logoCache = new Map();
 export async function exportExcel(tables, filename) {
   await loadScript(EXCELJS);
   const wb = new window.ExcelJS.Workbook();
@@ -441,6 +473,14 @@ export async function exportExcel(tables, filename) {
       ws.getRow(row).height = height;
     };
     band(1, p.org.join('  —  '), { size: 15, color: '#FFFFFF', bg: th.dark, height: 28 });
+    if (p.logo) {
+      // شعار الكلية في زاوية الترويسة
+      try {
+        if (!logoCache.has(p.logo)) logoCache.set(p.logo, fetch(p.logo).then((r) => (r.ok ? r.arrayBuffer() : null)).catch(() => null));
+        const buf = await logoCache.get(p.logo);
+        if (buf) ws.addImage(wb.addImage({ buffer: buf, extension: /\.jpe?g($|\?)/i.test(p.logo) ? 'jpeg' : 'png' }), { tl: { col: 0.15, row: 0.1 }, ext: { width: 56, height: 56 } });
+      } catch { /* الشعار اختياري */ }
+    }
     band(2, `${p.title}  —  ${plain(p.meta[0] || '')}`, { size: 18, bg: th.theory, height: 32 });
     band(3, [plain(p.meta[1] || ''), p.year ? `العام الدراسي ${p.year}` : '', plain(p.sub)].filter(Boolean).join('   •   '), { size: 11.5, bold: false, color: '#3A464D', bg: th.theory, height: 20 });
     ws.getCell(3, 1).border = { bottom: { style: 'medium', color: { argb: argb(th.accent) } } };

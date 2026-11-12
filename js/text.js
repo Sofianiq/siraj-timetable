@@ -4,10 +4,13 @@
 export const normName = (v) => String(v || '').trim()
   .replace(/[ً-ْـ]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/\s+/g, ' ');
 
-/** اسم الشخص بدون اللقب للمقارنة: «د. أحمد الراوي» = «م.د احمد  الراوي» = «احمد الراوي» */
-export function normPerson(v) {
+/** اسم الشخص بدون اللقب (بمسافات موحّدة): «م.د. أحمد  الراوي» ← «احمد الراوي» */
+export function stripTitle(v) {
   let s = normName(v);
-  const title = /^(?:ا\s*\.\s*د|م\s*\.\s*د|م\s*\.\s*م|د\s*\.|م\s*\.|ا\s*\.|(?:ال)?دكتور(?:ه)?\s|(?:ال)?استاذ(?:ه)?\s|(?:ال)?مدرس(?:ه)?\s|(?:ال)?مهندس(?:ه)?\s)\s*/;
+  const title = /^(?:ا\s*\.\s*م\s*\.\s*د|ا\s*\.\s*د|م\s*\.\s*د|م\s*\.\s*م|د\s*\.|م\s*\.|ا\s*\.|(?:ال)?دكتور(?:ه)?\s|(?:ال)?استاذ(?:ه)?\s|(?:ال)?مدرس(?:ه)?\s|(?:ال)?مهندس(?:ه)?\s)\s*/;
   for (let i = 0; i < 4 && title.test(s); i++) s = s.replace(title, '');
-  return s.replace(/[.\s]/g, '');
+  return s.replace(/^[.\s]+/, '').replace(/\s+/g, ' ').trim();
 }
+
+/** اسم الشخص بدون اللقب للمقارنة: «د. أحمد الراوي» = «م.د أحمد  الراوي» = «احمد الراوي» */
+export const normPerson = (v) => stripTitle(v).replace(/[.\s]/g, '');

@@ -25,3 +25,14 @@ export const APP_TITLE = 'نظام إدارة الجداول الدراسية �
 export const UNIVERSITY = 'جامعة السراج';
 export const COLLEGE = 'كلية التقنيات الصحية والطبية';
 export const DEVELOPER = 'سفيان محمد';
+
+/**
+ * الربط بـ Supabase (اختياري — بديل Firebase). عند تعبئة الحقلين يعمل النظام على Supabase بدلاً من Firebase.
+ * من: Supabase ← Project Settings ← API: انسخ Project URL و anon public key.
+ * قبلها شغّل الملف supabase/schema.sql مرة واحدة في Supabase ← SQL Editor (راجع docs/SUPABASE_GUIDE.md).
+ * ملاحظة: anon key ليس سرياً؛ الحماية تتم عبر سياسات الأمان في schema.sql.
+ */
+export const supabaseConfig = {
+  url: '',
+  anonKey: '',
+};
