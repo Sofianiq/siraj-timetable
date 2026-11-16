@@ -6,11 +6,11 @@ import { store, byId, settings, batchWrite, canEditDept, isAdmin, canEdit, myDep
 import { checkSession, checkAll, hasErrors } from '../conflicts.js';
 import { renderGrid, renderList } from '../grid.js';
 import { esc, el, $, $$, modal, toast, confirmDialog } from '../ui.js';
-import { DAY_NAMES, SESSION_KINDS, SHIFTS, toHHMM, toMinutes, formatRange } from '../timeutil.js';
+import { DAY_NAMES, SESSION_KINDS, SHIFTS, toHHMM, toMinutes, formatRange, collegeHours } from '../timeutil.js';
 import {
   ctx, currentTerm, termSessions, sessionsForView, groupsSorted, groupLabel, deptName, sortByName, deptTables, collegeTables, looseLabel,
   VIEW_TYPES, viewHeader, stageName, currentCollegeId, setCurrentCollege, managedColleges, deptsOfCollege, deptOptionsHTML,
-  collegeName, collegeShort, teacherCollege, teachesIn, sharedInto,
+  collegeName, collegeShort, teacherCollege, teachesIn, sharedInto, groupShiftWindow,
 } from '../model.js';
 import { exportPDF, exportExcel, printTables, savePDF, previewTables, setPrintProvider } from '../export.js';
 import { subgroupColor } from '../subgroups.js';
@@ -185,6 +185,11 @@ export function renderSchedule(container, params = {}, { publicMode = false } = 
   /** نطاق الساعات: الدوام من الإعدادات، ويتسع بساعات كاملة لأي محاضرة خارجه حتى لا تُقص */
   function gridRange(list) {
     let dayStart = st.dayStart ?? 510, dayEnd = st.dayEnd ?? 870;
+    // جدول الشعبة: من دوامها (المسائي أو دوام كليتها إن حُدِّد)
+    const win = state.type === 'group' ? groupShiftWindow(byId('groups', state.id)) : null;
+    if (win && (byId('groups', state.id)?.shift === 'evening' || collegeHours(byId('colleges', collegeOfDept(byId('groups', state.id)?.deptId)), 'morning'))) {
+      dayStart = win.start; dayEnd = win.end;
+    }
     if (dayEnd <= dayStart) dayEnd = dayStart + 360;
     for (const s of list) {
       while (s.start < dayStart) dayStart -= 60;
@@ -358,6 +363,7 @@ export async function openEditor(session, defaults = {}) {
       <div class="field full" id="subField" hidden><label>مجموعة العملي</label><div class="checklist inline" id="subBox"></div>
         <small class="muted">اختر المجموعة (أو المجاميع) التي تحضر هذا العملي، فتأخذ بقية المجاميع مواد أخرى في الوقت نفسه. اتركها كلها بدون تحديد إذا كانت المحاضرة للشعبة كاملة (مثل النظري).</small></div>
       <div class="field" data-for="normal"><label>الأستاذ</label><select name="teacherId"></select></div>
+      <div class="field" data-for="normal"><label>أستاذ مشارك <small class="muted">(اختياري — مختبر بأستاذين مثلاً)</small></label><select name="coTeacherId"></select></div>
       <div class="field"><label>القاعة / المختبر</label><select name="roomId"></select></div>
       <div class="field"><label>اليوم</label><select name="day">${days.map((d) => `<option value="${d}" ${d === s.day ? 'selected' : ''}>${DAY_NAMES[d]}</option>`).join('')}</select></div>
       <div class="field"><label>من الساعة</label><input type="time" name="start" step="${step * 60}" value="${toHHMM(s.start ?? 510)}"></div>
@@ -429,19 +435,24 @@ export async function openEditor(session, defaults = {}) {
     const deptId = f('deptId').value;
     const cid = collegeOfDept(deptId);
     const keep = f('teacherId').value || s.teacherId;
+    const keep2 = f('coTeacherId').value || (s.coTeacherIds || [])[0] || '';
     const ts = sortByName(store.data.teachers);
     const own = ts.filter((t) => t.deptId === deptId);
     const college = ts.filter((t) => t.deptId !== deptId && cid && teacherCollege(t) === cid);
     const shared = ts.filter((t) => sharedInto(t, cid));
     const other = ts.filter((t) => !own.includes(t) && !college.includes(t) && !shared.includes(t));
-    const opt = (t, tag = '') => `<option value="${t.id}" ${t.id === keep ? 'selected' : ''}>${esc(t.name)}${tag}</option>`;
+    const opt = (t, tag = '') => `<option value="${t.id}">${esc(t.name)}${tag}</option>`;
     const tagOf = (t) => (t.deptId ? ` — ${esc(collegeShort(teacherCollege(t)))}` : '');
     const deptShort = (t) => (byId('departments', t.deptId)?.general ? '' : ` — ${esc(byId('departments', t.deptId)?.short || deptName(t.deptId))}`);
-    f('teacherId').innerHTML = '<option value="">— بدون —</option>' +
+    const html = '<option value="">— بدون —</option>' +
       (own.length ? `<optgroup label="${byId('departments', deptId)?.general ? 'كادر الكلية' : 'أساتذة القسم'}">${own.map((t) => opt(t)).join('')}</optgroup>` : '') +
       (college.length ? `<optgroup label="كادر الكلية">${college.map((t) => opt(t, deptShort(t))).join('')}</optgroup>` : '') +
       (shared.length ? `<optgroup label="مشتركون من كليات أخرى">${shared.map((t) => opt(t, tagOf(t))).join('')}</optgroup>` : '') +
       (other.length ? `<optgroup label="أساتذة كليات أخرى (يُضاف إلى كادر هذه الكلية عند اختياره)">${other.map((t) => opt(t, tagOf(t))).join('')}</optgroup>` : '');
+    f('teacherId').innerHTML = html;
+    f('teacherId').value = keep || '';
+    f('coTeacherId').innerHTML = html;
+    f('coTeacherId').value = keep2;
   }
   /** اختيار أستاذ من كلية أخرى غير مشترك فيها: يُضاف إلى كادر كلية المحاضرة تلقائياً (إن سمحت الصلاحية) */
   function shareOps(v) {
@@ -469,7 +480,12 @@ export async function openEditor(session, defaults = {}) {
       roomId: f('roomId').value || null, locked: f('locked').checked, note: f('note').value.trim(), term: s.term || currentTerm(),
     };
     if (kind === 'external') Object.assign(v, { title: f('title').value.trim(), bookedBy: f('bookedBy').value.trim(), groupIds: [], teacherId: null, subjectId: null, deptId: null });
-    else Object.assign(v, { deptId: f('deptId').value, subjectId: f('subjectId').value || null, groupIds: currentGroups(), subgroups: currentSubs(), teacherId: f('teacherId').value || null });
+    else {
+      const teacherId = f('teacherId').value || null;
+      // الأستاذ المشارك الأول من النموذج، ويُحتفظ بأي مشاركين إضافيين سُجّلوا سابقاً
+      const co = [f('coTeacherId').value, ...(s.coTeacherIds || []).slice(1)].filter((x) => x && x !== teacherId);
+      Object.assign(v, { deptId: f('deptId').value, subjectId: f('subjectId').value || null, groupIds: currentGroups(), subgroups: currentSubs(), teacherId, coTeacherIds: [...new Set(co)] });
+    }
     return v;
   }
   function refreshIssues() {

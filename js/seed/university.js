@@ -1,0 +1,290 @@
+/**
+ * استيراد جداول كليات الجامعة (دالة نقية تعيد عمليات كتابة وتقريراً للمعاينة قبل الحفظ).
+ *
+ * - الكليات والأقسام تُطابَق بالاسم مع ما أضافه المستخدم («الكلية التقنية الهندسية» = «كلية التقنية الهندسية»)،
+ *   وتُنشأ فقط إن لم توجد. المراحل والشعب (صباحي/مسائي) ومجاميع العملي تُكمَّل حسب الجداول.
+ * - القاعات تُطابَق بالرمز أو الاسم على مستوى الجامعة، وتُسجَّل الكلية المالكة لكل قاعة.
+ * - الأساتذة يُطابَقون داخل كادر الكلية نفسها فقط (تجاهل اللقب، والاسم المختصر = الكامل)، فلا يُخلط بين شخصين
+ *   بالاسم نفسه في كليتين. المشتركون بين الكليات مُعرَّفون في البيانات فيُضافون مرة واحدة مع كلياتهم الأخرى.
+ * - المواد تُطابَق في القسم والمرحلة والفصل، وتُحدَّث ساعاتها وأساتذتها، وتُضاف غير الموجودة.
+ * - المحاضرات لها معرّفات ثابتة مشتقة من محتواها، فإعادة الاستيراد تحدّثها ولا تكررها، وتُثبَّت 🔒 حتى لا يحرّكها التوليد التلقائي.
+ */
+import { normName, normPerson, stripTitle } from '../text.js';
+import { STAGE_NAMES, SHIFTS } from '../timeutil.js';
+import { subjectSimilarity, samePerson } from './curriculum.js';
+import { DATA_VERSION, TERM, COLLEGES, ROOMS, TEACHERS, SUBJECTS, GROUPS, SESSIONS, SKIPPED_ROOMS } from './university-data.js';
+
+export { DATA_VERSION, TERM, SKIPPED_ROOMS };
+
+const N = (v) => normName(v).toLowerCase().replace(/^(ال)/, '');
+/** هل يطابق الاسم إحدى مجموعات الكلمات (كل كلمات المجموعة موجودة) دون كلمات الاستثناء؟ */
+export function matchName(name, match = [], exclude = []) {
+  const n = normName(name);
+  return match.some((words) => words.every((w) => n.includes(normName(w)))) && !exclude.some((w) => n.includes(normName(w)));
+}
+const codeKey = (v) => String(v || '').toUpperCase().replace(/\s+/g, '');
+const SIG_FIELDS = ['term', 'deptId', 'subjectId', 'kind', 'groupIds', 'subgroups', 'teacherId', 'coTeacherIds', 'roomId', 'day', 'start', 'end', 'note'];
+/** معرّف ثابت من نص (FNV-1a) */
+function hashId(text) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return `tt${(h >>> 0).toString(36)}${text.length.toString(36)}`;
+}
+/** اللقب العلمي من بداية الاسم */
+function titleOf(name) {
+  const n = normName(name);
+  if (/^ا\s*\.\s*م\s*\.\s*د/.test(n)) return 'أستاذ مساعد';
+  if (/^ا\s*\.\s*د/.test(n)) return 'أستاذ';
+  if (/^م\s*\.\s*د/.test(n)) return 'مدرس';
+  if (/^م\s*\.\s*م/.test(n)) return 'مدرس مساعد';
+  if (/^م\s*\./.test(n)) return 'مدرس';
+  return null;
+}
+
+/**
+ * @param {Object} data بيانات النظام الحالية (store.data)
+ * @param {() => string} uid مولد المعرّفات
+ * @param {{replace?: boolean}} options replace: حذف المحاضرات الأخرى لشعب الجداول المستوردة في الفصل نفسه
+ */
+export function universityImportPlan(data, uid, { replace = false } = {}) {
+  const ops = [];
+  const count = () => ({ colleges: 0, departments: 0, stages: 0, groups: 0, rooms: 0, teachers: 0, subjects: 0, sessions: 0 });
+  const report = { created: count(), updated: count(), colleges: [], departments: [], warnings: [], similarTeachers: [], replaced: 0, existingOther: 0 };
+  const term = `${TERM.year}/${TERM.semester}`;
+  const colleges = [...(data.colleges || [])];
+  const departments = [...(data.departments || [])];
+  const stages = [...(data.stages || [])];
+  const groups = [...(data.groups || [])];
+
+  /* ---------------- الكليات ---------------- */
+  const collegeId = {};
+  let order = Math.max(0, ...colleges.map((c) => Number(c.order) || 0));
+  for (const C of COLLEGES) {
+    const c = colleges.find((x) => x.own !== false && matchName(x.name, C.match, C.exclude));
+    const hours = {};
+    for (const [shift, [a, b]] of Object.entries(C.hours || {})) { hours[`${shift}Start`] = a; hours[`${shift}End`] = b; }
+    if (c) {
+      collegeId[C.key] = c.id;
+      // تُكمَّل الحقول الفارغة فقط، ولا يُغيَّر ما أدخله المستخدم
+      const patch = {};
+      if (C.logo && !c.logo) patch.logo = C.logo;
+      for (const [k, v] of Object.entries(hours)) if (!c[k]) patch[k] = v;
+      if (Object.keys(patch).length) { ops.push({ op: 'update', col: 'colleges', id: c.id, data: patch }); report.updated.colleges++; }
+      report.colleges.push({ key: C.key, name: c.name, status: 'matched', rooms: C.roomsOnly });
+    } else if (C.existing) {
+      report.warnings.push(`لم يُعثر على «${C.name}» في النظام، فلن تُربط بها قاعاتها في الترميز.`);
+    } else {
+      const id = uid();
+      const doc = { name: C.name, short: C.short, order: ++order, own: true, ...(C.logo ? { logo: C.logo } : {}), ...hours };
+      ops.push({ op: 'set', col: 'colleges', id, data: doc });
+      colleges.push({ id, ...doc });
+      collegeId[C.key] = id;
+      report.created.colleges++;
+      report.colleges.push({ key: C.key, name: C.name, status: 'created', rooms: C.roomsOnly });
+    }
+  }
+
+  /* ---------------- الأقسام ---------------- */
+  const deptId = {};
+  for (const C of COLLEGES) {
+    const cid = collegeId[C.key];
+    if (!cid) continue;
+    const used = new Set();
+    for (const D of C.departments || []) {
+      const path = `${C.key}/${D.key}`;
+      const own = departments.filter((d) => d.collegeId === cid && !used.has(d.id));
+      let d = D.general
+        ? own.find((x) => x.general) || (own.length === 1 ? own[0] : null)
+        : own.find((x) => !x.general && matchName(x.name, D.match));
+      if (d) {
+        const patch = {};
+        if (D.head && !d.head) patch.head = D.head;
+        if (D.short && !d.short && !d.general) patch.short = D.short;
+        if (Object.keys(patch).length) ops.push({ op: 'update', col: 'departments', id: d.id, data: patch });
+        report.departments.push({ path, name: d.name, college: C.name, status: 'matched' });
+      } else {
+        const id = uid();
+        const doc = { name: D.name, collegeId: cid, ...(D.short ? { short: D.short } : {}), ...(D.general ? { general: true } : {}), ...(D.head ? { head: D.head } : {}) };
+        ops.push({ op: 'set', col: 'departments', id, data: doc });
+        d = { id, ...doc };
+        departments.push(d);
+        report.created.departments++;
+        report.departments.push({ path, name: D.name, college: C.name, status: 'created' });
+      }
+      used.add(d.id);
+      deptId[path] = d.id;
+    }
+  }
+
+  /* ---------------- المراحل والشعب ومجاميع العملي ---------------- */
+  const groupId = {};
+  for (const [path, level, shift, subs] of GROUPS) {
+    const did = deptId[path];
+    if (!did) continue;
+    let st = stages.find((x) => x.deptId === did && Number(x.level) === level);
+    if (!st) {
+      st = { id: uid(), deptId: did, level, name: `المرحلة ${STAGE_NAMES[level]}` };
+      ops.push({ op: 'set', col: 'stages', id: st.id, data: { deptId: did, level, name: st.name } });
+      stages.push(st);
+      report.created.stages++;
+    }
+    const cands = groups.filter((g) => g.stageId === st.id && (g.shift || 'morning') === shift);
+    let g = cands.find((x) => normName(x.name) === normName(SHIFTS[shift])) || cands[0];
+    if (!g) {
+      g = { id: uid(), deptId: did, stageId: st.id, shift, name: SHIFTS[shift], students: 0, subgroups: subs };
+      ops.push({ op: 'set', col: 'groups', id: g.id, data: { deptId: did, stageId: st.id, shift, name: g.name, students: 0, subgroups: subs } });
+      groups.push(g);
+      report.created.groups++;
+    } else if (subs.length) {
+      const merged = [...new Set([...(g.subgroups || []), ...subs])];
+      if (merged.length !== (g.subgroups || []).length) {
+        ops.push({ op: 'update', col: 'groups', id: g.id, data: { subgroups: merged } });
+        report.updated.groups++;
+      }
+    }
+    groupId[`${path}|${level}|${shift}`] = g.id;
+  }
+
+  /* ---------------- القاعات (على مستوى الجامعة) ---------------- */
+  const roomId = {};
+  const rooms = [...(data.rooms || [])];
+  for (const [key, name, code, type, college, dept, building] of ROOMS) {
+    const r = rooms.find((x) => (code && (codeKey(x.code) === codeKey(code) || codeKey(x.name) === codeKey(code)))
+      || normName(x.name) === normName(name));
+    if (r) {
+      const patch = {};
+      if (code && !r.code) patch.code = code;
+      if (building && !r.building) patch.building = building;
+      if (!r.collegeId && college && collegeId[college]) patch.collegeId = collegeId[college];
+      if (Object.keys(patch).length) { ops.push({ op: 'update', col: 'rooms', id: r.id, data: patch }); report.updated.rooms++; }
+      roomId[key] = r.id;
+    } else {
+      const id = uid();
+      const doc = { name, code: code || '', type, labKind: '', capacity: null, collegeId: collegeId[college] || null,
+        deptId: dept ? deptId[`${college}/${dept}`] || null : null, building: building || '', active: true };
+      ops.push({ op: 'set', col: 'rooms', id, data: doc });
+      rooms.push({ id, ...doc });
+      roomId[key] = id;
+      report.created.rooms++;
+    }
+  }
+
+  /* ---------------- الأساتذة ---------------- */
+  const homeCollege = (t) => departments.find((d) => d.id === t.deptId)?.collegeId;
+  const collegesOf = (t) => [homeCollege(t), ...(t.sharedColleges || [])].filter(Boolean);
+  const existingTeachers = data.teachers || [];
+  const generalDept = (ck) => {
+    const cid = collegeId[ck];
+    return departments.find((d) => d.collegeId === cid && d.general)?.id || departments.find((d) => d.collegeId === cid)?.id;
+  };
+  const teacherId = {};
+  for (const [key, name, college, dept, shared, cross] of TEACHERS) {
+    const cid = collegeId[college];
+    if (!cid) continue;
+    const sharedIds = shared.map((k) => collegeId[k]).filter(Boolean);
+    const pool = existingTeachers.filter((t) => collegesOf(t).includes(cid));
+    let t = pool.find((x) => normPerson(x.name) === normPerson(name));
+    if (!t) { const sim = pool.filter((x) => samePerson(x.name, name)); if (sim.length === 1) [t] = sim; }
+    if (!t && cross) { const sim = existingTeachers.filter((x) => samePerson(x.name, name)); if (sim.length === 1) [t] = sim; }
+    if (t) {
+      const home = homeCollege(t);
+      const want = [...new Set([...(t.sharedColleges || []), cid, ...sharedIds])].filter((c) => c && c !== home);
+      if (want.length !== (t.sharedColleges || []).filter((c) => c !== home).length) {
+        ops.push({ op: 'update', col: 'teachers', id: t.id, data: { sharedColleges: want } });
+        report.updated.teachers++;
+      }
+      teacherId[key] = t.id;
+    } else {
+      const id = uid();
+      const home = (dept && deptId[`${college}/${dept}`]) || generalDept(college);
+      ops.push({ op: 'set', col: 'teachers', id, data: { name, title: titleOf(name), deptId: home, availability: {}, sharedColleges: sharedIds.filter((c) => c !== cid) } });
+      teacherId[key] = id;
+      report.created.teachers++;
+      // تشابه أسماء مع كادر كلية أخرى: يُعرض للمراجعة ولا يُدمج تلقائياً
+      const other = existingTeachers.filter((x) => !collegesOf(x).includes(cid) && normPerson(x.name) === normPerson(name));
+      if (other.length) report.similarTeachers.push({ name, college: COLLEGES.find((c) => c.key === college).name, other: other.map((x) => x.name) });
+    }
+  }
+
+  /* ---------------- المواد ---------------- */
+  const subjectId = {};
+  const existingSubjects = data.subjects || [];
+  const usedSubj = new Set();
+  for (const [path, level, name, th, pr, online, tt, pt] of SUBJECTS) {
+    const did = deptId[path];
+    if (!did) continue;
+    const pool = existingSubjects.filter((s) => s.deptId === did && Number(s.stageLevel) === level && Number(s.semester || 1) === TERM.semester && !usedSubj.has(s.id));
+    let s = pool.find((x) => N(x.name) === N(name));
+    if (!s) {
+      const best = pool.map((x) => [x, subjectSimilarity(x.name.toLowerCase(), name.toLowerCase())]).filter(([, sc]) => sc >= 0.8).sort((a, b) => b[1] - a[1])[0];
+      if (best) [s] = best;
+    }
+    const official = { theoryHours: th, practicalHours: pr, onlineHours: online || 0 };
+    const tids = { theoryTeacherId: teacherId[tt] || null, practicalTeacherId: teacherId[pt] || null };
+    if (s) {
+      usedSubj.add(s.id);
+      const patch = {};
+      for (const [k, v] of Object.entries(official)) if ((s[k] ?? 0) !== v) patch[k] = v;
+      for (const [k, v] of Object.entries(tids)) if (v && !s[k]) patch[k] = v;
+      if (s.needsReview) patch.needsReview = false;
+      if (Object.keys(patch).length) { ops.push({ op: 'update', col: 'subjects', id: s.id, data: patch }); report.updated.subjects++; }
+      subjectId[`${path}|${level}|${name}`] = s.id;
+    } else {
+      const id = uid();
+      ops.push({ op: 'set', col: 'subjects', id, data: {
+        deptId: did, stageLevel: level, semester: TERM.semester, name, ...official, ...tids, labType: '', combineTheory: true, fromTimetable: true,
+      } });
+      subjectId[`${path}|${level}|${name}`] = id;
+      report.created.subjects++;
+    }
+  }
+
+  /* ---------------- المحاضرات ---------------- */
+  const sessions = data.sessions || [];
+  const existingIds = new Set(sessions.map((s) => s.id));
+  const keep = new Set();
+  const touchedGroups = new Set();
+  for (const [path, level, shift, subj, kind, day, start, end, tkeys, rkey, subs, note] of SESSIONS) {
+    const gid = groupId[`${path}|${level}|${shift}`];
+    const sid = subjectId[`${path}|${level}|${subj}`];
+    if (!gid || !sid) continue;
+    touchedGroups.add(gid);
+    const id = hashId(`${path}|${level}|${shift}|${day}|${start}|${end}|${subj}|${kind}|${subs.join('')}`);
+    const tids = tkeys.map((k) => teacherId[k]).filter(Boolean);
+    keep.add(id);
+    const doc = {
+      term, deptId: deptId[path], subjectId: sid, kind: kind === 'p' ? 'practical' : 'theory', groupIds: [gid], subgroups: subs,
+      teacherId: tids[0] || null, coTeacherIds: tids.slice(1), roomId: (rkey && roomId[rkey]) || null,
+      day, start, end, locked: true, auto: false, note: note || '', source: 'university',
+    };
+    // بصمة الحقول المستوردة: تكشف إن عدّل المستخدم المحاضرة يدوياً بعد الاستيراد
+    const sig = (o) => hashId(JSON.stringify(SIG_FIELDS.map((k) => o[k] ?? null)));
+    doc.importSig = sig(doc);
+    const old = existingIds.has(id) ? sessions.find((x) => x.id === id) : null;
+    if (old) {
+      // لم تتغير البيانات، أو عدّلها المستخدم (وقت/قاعة/أستاذ) فتبقى تعديلاته
+      if (old.importSig === doc.importSig || (old.importSig && sig(old) !== old.importSig)) continue;
+      report.updated.sessions++;
+    } else report.created.sessions++;
+    ops.push({ op: 'set', col: 'sessions', id, data: doc });
+  }
+  // محاضرات أخرى مسجّلة مسبقاً لشعب الجداول المستوردة في الفصل نفسه
+  const others = sessions.filter((s) => (s.term || '') === term && !keep.has(s.id) && (s.groupIds || []).some((g) => touchedGroups.has(g)));
+  report.existingOther = others.length;
+  if (replace) {
+    for (const s of others) ops.push({ op: 'delete', col: 'sessions', id: s.id });
+    report.replaced = others.length;
+  }
+  report.term = term;
+  return { ops, report };
+}
+
+/** ملخص نصي قصير لأعداد ما سيُضاف ويُحدَّث */
+export function importSummary(report) {
+  const L = { colleges: 'كلية', departments: 'قسم', stages: 'مرحلة', groups: 'شعبة', rooms: 'قاعة/مختبر', teachers: 'أستاذ', subjects: 'مادة', sessions: 'محاضرة' };
+  const part = (obj) => Object.entries(obj).filter(([, n]) => n).map(([k, n]) => `${n} ${L[k]}`).join('، ');
+  return { created: part(report.created), updated: part(report.updated) };
+}
+
+/** اسم الأستاذ بدون لقب (للعرض في التقرير) */
+export const bareName = (v) => stripTitle(v);

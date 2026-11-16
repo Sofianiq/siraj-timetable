@@ -6,7 +6,7 @@
  *   error   (يمنع الحفظ): الأستاذ مشغول، القاعة محجوزة (على مستوى الجامعة)، الشعبة لديها محاضرة أخرى.
  *   warning (تنبيه فقط):  تجاوز سعة القاعة، خارج أوقات توفر الأستاذ، خارج وقت الدوام، نوع القاعة غير مناسب.
  */
-import { overlaps, DAY_NAMES, formatRange } from './timeutil.js';
+import { overlaps, DAY_NAMES, formatRange, collegeHours } from './timeutil.js';
 import { subsOf, subsOverlap, subgroupShare } from './subgroups.js';
 
 /**
@@ -19,9 +19,20 @@ import { subsOf, subsOverlap, subgroupShare } from './subgroups.js';
  */
 
 /** بناء سياق البحث من مصفوفات البيانات */
-export function buildCtx({ rooms = [], groups = [], teachers = [], subjects = [], settings = {} }) {
+export function buildCtx({ rooms = [], groups = [], teachers = [], subjects = [], departments = [], colleges = [], settings = {} }) {
   const toMap = (arr) => new Map(arr.map((x) => [x.id, x]));
-  return { rooms: toMap(rooms), groups: toMap(groups), teachers: toMap(teachers), subjects: toMap(subjects), settings };
+  return { rooms: toMap(rooms), groups: toMap(groups), teachers: toMap(teachers), subjects: toMap(subjects),
+    departments: toMap(departments), colleges: toMap(colleges), settings };
+}
+
+/** أساتذة المحاضرة: الأستاذ الأساسي ثم المشاركون (مختبر يشرف عليه أستاذان مثلاً) */
+export const teachersOf = (s) => [...new Set([s?.teacherId, ...(s?.coTeacherIds || [])].filter(Boolean))];
+
+/** وقت دوام الشعبة: دوام كليتها إن حُدِّد في صفحة الكليات، وإلا دوام الجامعة من الإعدادات */
+export function shiftWindow(ctx, group) {
+  if (!group) return null;
+  const dept = ctx.departments?.get(group.deptId);
+  return collegeHours(dept && ctx.colleges?.get(dept.collegeId), group.shift) || ctx.settings?.shifts?.[group.shift] || null;
 }
 
 /** هل تنتمي المحاضرتان للفترة الدراسية نفسها؟ */
@@ -74,11 +85,13 @@ export function checkSession(s, all, ctx) {
     return issues;
   }
   const sGroups = new Set(s.groupIds || []);
+  const sTeachers = teachersOf(s);
 
   for (const o of all) {
     if (!timeClash(s, o)) continue;
-    if (s.teacherId && o.teacherId === s.teacherId) {
-      const t = ctx.teachers.get(s.teacherId);
+    const oTeachers = teachersOf(o);
+    for (const tid of sTeachers.filter((x) => oTeachers.includes(x))) {
+      const t = ctx.teachers.get(tid);
       issues.push({ level: 'error', type: 'teacher', otherId: o.id,
         message: `الأستاذ ${t?.name || ''} مرتبط بمحاضرة أخرى في الوقت نفسه: ${describe(o, ctx)}` });
     }
@@ -112,21 +125,20 @@ export function checkSession(s, all, ctx) {
     }
   }
 
-  const teacher = ctx.teachers.get(s.teacherId);
-  if (teacher && !teacherAvailable(teacher, s.day, s.start, s.end)) {
-    issues.push({ level: 'warning', type: 'availability', message: `الوقت خارج أوقات توفر الأستاذ ${teacher.name}` });
+  for (const tid of sTeachers) {
+    const teacher = ctx.teachers.get(tid);
+    if (teacher && !teacherAvailable(teacher, s.day, s.start, s.end)) {
+      issues.push({ level: 'warning', type: 'availability', message: `الوقت خارج أوقات توفر الأستاذ ${teacher.name}` });
+    }
   }
 
-  const shifts = ctx.settings?.shifts;
-  if (shifts) {
-    for (const gid of s.groupIds || []) {
-      const g = ctx.groups.get(gid);
-      const win = g && shifts[g.shift];
-      if (win && (s.start < win.start || s.end > win.end)) {
-        issues.push({ level: 'warning', type: 'shift',
-          message: `المحاضرة خارج وقت الدوام ${g.shift === 'evening' ? 'المسائي' : 'الصباحي'} للشعبة ${g.name}` });
-        break;
-      }
+  for (const gid of s.groupIds || []) {
+    const g = ctx.groups.get(gid);
+    const win = shiftWindow(ctx, g);
+    if (win && (s.start < win.start || s.end > win.end)) {
+      issues.push({ level: 'warning', type: 'shift',
+        message: `المحاضرة خارج وقت الدوام ${g.shift === 'evening' ? 'المسائي' : 'الصباحي'} للشعبة ${g.name}` });
+      break;
     }
   }
   return issues;

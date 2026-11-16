@@ -14,6 +14,7 @@ import {
 } from '../model.js';
 import { normPerson } from '../text.js';
 import { parseSubgroups, subgroupColor } from '../subgroups.js';
+import { teachersOf } from '../conflicts.js';
 import { collegeStructureOps } from '../seed/radiology.js';
 import { themeOptions, themeSwatch, themeKeyForDept } from '../themes.js';
 
@@ -52,6 +53,15 @@ const defaultDept = () => myDeptId() || deptsOfCollege(currentCollegeId()).find(
 const defaultCollege = () => myCollegeId() || currentCollegeId() || managedColleges()[0]?.id || '';
 const stageLevelOptions = () => [1, 2, 3, 4, 5, 6].map((l) => ({ value: l, label: `المرحلة ${STAGE_NAMES[l]}` }));
 
+/** «8:30–3:30 / مسائي 12:30–8:30» أو «دوام الجامعة» */
+function collegeHoursText(c) {
+  const t = (v) => { const [h, m] = String(v).split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')}`; };
+  const parts = [];
+  if (c.morningStart && c.morningEnd) parts.push(`${t(c.morningStart)}–${t(c.morningEnd)}`);
+  if (c.eveningStart && c.eveningEnd) parts.push(`مسائي ${t(c.eveningStart)}–${t(c.eveningEnd)}`);
+  return parts.join(' / ') || '<span class="muted">دوام الجامعة</span>';
+}
+
 /* =============================== تعريف الكيانات =============================== */
 const ENTITIES = {
   colleges: {
@@ -64,12 +74,18 @@ const ENTITIES = {
       { key: 'logo', label: 'شعار الكلية (اختياري)', full: true, placeholder: 'رابط صورة، مثل: https://…/logo.png',
         help: 'يظهر في ترويسة الجداول المطبوعة وملفات Excel. لكلية التقنيات الصحية والطبية شعارها مرفق مسبقاً.' },
       { key: 'theme', label: 'لون الجداول المطبوعة', type: 'select', options: themeOptions(), placeholder: 'تلقائي', help: 'يُستخدم لأقسام الكلية التي لم يُحدَّد لها لون خاص' },
+      { key: 'dean', label: 'عميد الكلية (اختياري)', placeholder: 'مثال: أ.د. …', help: 'يُطبع اسمه تحت توقيع العميد في الجداول العامة للكلية' },
+      { key: 'morningStart', label: 'الدوام الصباحي: من', type: 'time', help: 'اتركه فارغاً لاعتماد دوام الجامعة من الإعدادات' },
+      { key: 'morningEnd', label: 'الدوام الصباحي: إلى', type: 'time' },
+      { key: 'eveningStart', label: 'الدوام المسائي: من', type: 'time' },
+      { key: 'eveningEnd', label: 'الدوام المسائي: إلى', type: 'time' },
       { key: 'own', label: 'النوع', type: 'checkbox', checkLabel: 'كلية مُدارة في النظام (لها أقسام وجداول). ألغِ التحديد لجهة خارجية تُستخدم للحجوزات فقط', default: true, full: true },
       { key: 'autoStructure', label: 'الهيكل', type: 'checkbox', createOnly: true, default: true, full: true,
         checkLabel: 'إنشاء «قسم عام» يمثل الكلية كاملة مع مراحله وشعبة صباحية لكل مرحلة (مناسب للكليات التي لا تقسم طلبتها إلى أقسام)' },
       { key: 'stagesCount', label: 'عدد المراحل الدراسية', type: 'number', min: 1, max: 6, default: 4, createOnly: true },
     ],
-    columns: [['name', 'الاسم'], ['short', 'مختصر'], [(r) => (r.own !== false ? 'مُدارة' : 'جهة خارجية'), 'النوع'],
+    columns: [[(r) => `${r.logo ? `<img class="tbl-logo" src="${esc(r.logo)}" alt=""> ` : ''}${esc(r.name)}`, 'الاسم', true], ['short', 'مختصر'], [(r) => (r.own !== false ? 'مُدارة' : 'جهة خارجية'), 'النوع'],
+      [(r) => collegeHoursText(r), 'الدوام', true],
       [(r) => store.data.departments.filter((d) => d.collegeId === r.id).length, 'الأقسام'],
       [(r) => store.data.groups.filter((g) => collegeOfDept(g.deptId) === r.id).length, 'الشعب'],
       [(r) => store.data.rooms.filter((x) => x.collegeId === r.id).length, 'القاعات المملوكة']],
@@ -92,6 +108,7 @@ const ENTITIES = {
       { key: 'short', label: 'الاسم المختصر', placeholder: 'مثال: الأشعة' },
       { key: 'collegeId', label: 'الكلية', type: 'select', options: collegeOptions((c) => c.own !== false && canEditCollege(c.id)), required: true, default: defaultCollege() },
       { key: 'general', label: 'قسم عام', type: 'checkbox', checkLabel: 'يمثل الكلية كاملة (لا يظهر اسمه كقسم في الطباعة)' },
+      { key: 'head', label: 'رئيس القسم (اختياري)', placeholder: 'مثال: أ.م.د. …', help: 'يُطبع اسمه تحت توقيع رئيس القسم في الجداول المطبوعة' },
       { key: 'theme', label: 'لون الجداول المطبوعة', type: 'select', options: themeOptions(), placeholder: 'تلقائي', help: 'لكل قسم لون مميز في PDF والطباعة وExcel. «تلقائي» يختار لوناً مختلفاً لكل قسم.' },
       { key: 'stagesCount', label: 'عدد المراحل الدراسية', type: 'number', min: 0, max: 6, default: 4, createOnly: true,
         help: 'تُنشأ المراحل مع شعبة «صباحي» لكل مرحلة، ويمكن تعديلها لاحقاً من صفحة «المراحل والشعب». اكتب 0 لعدم الإنشاء.' },
@@ -161,9 +178,10 @@ const ENTITIES = {
       [(r) => collegeShort(teacherCollege(r)), 'الكلية الأساسية'],
       [(r) => (r.sharedColleges || []).filter((c) => c !== teacherCollege(r)).map((c) => collegeShort(c)).filter(Boolean).join('، ') || '—', 'يدرّس أيضاً في'],
       [(r) => availabilitySummary(r.availability), 'أوقات التوفر'],
-      [(r) => store.data.sessions.filter((s) => s.teacherId === r.id).reduce((n, s) => n + (s.end - s.start) / 60, 0), 'ساعات مجدولة']],
+      [(r) => store.data.sessions.filter((s) => teachersOf(s).includes(r.id)).reduce((n, s) => n + (s.end - s.start) / 60, 0), 'ساعات مجدولة']],
     rowActions: [{ label: '🕒 أوقات التوفر', run: (r) => editAvailability(r) }],
-    onDelete: (r) => store.data.sessions.filter((s) => s.teacherId === r.id).map((s) => ({ op: 'update', col: 'sessions', id: s.id, data: { teacherId: null } })),
+    onDelete: (r) => store.data.sessions.filter((s) => teachersOf(s).includes(r.id)).map((s) => ({ op: 'update', col: 'sessions', id: s.id,
+      data: { teacherId: s.teacherId === r.id ? null : s.teacherId, coTeacherIds: (s.coTeacherIds || []).filter((x) => x !== r.id) } })),
   },
   rooms: {
     title: 'القاعات والمختبرات', single: 'قاعة/مختبر', icon: '🚪', collegeScoped: (r) => r.collegeId, sharedWhenEmpty: true,
@@ -171,6 +189,7 @@ const ENTITIES = {
     canEdit: (r) => isAdmin() || canEditCollege(r ? r.collegeId : myCollegeId()),
     fields: () => [
       { key: 'name', label: 'الاسم', required: true, placeholder: 'مثال: القاعة 5 أو مختبر الأشعة 2' },
+      { key: 'code', label: 'رمز القاعة', placeholder: 'مثال: SE201', help: 'الرمز المكتوب على باب القاعة' },
       { key: 'type', label: 'النوع', type: 'select', options: Object.entries(ROOM_TYPES).map(([value, label]) => ({ value, label })), required: true, default: 'hall' },
       { key: 'labKind', label: 'نوع المختبر (للمختبرات)', placeholder: 'مثال: مختبر أشعة', help: 'يطابق حقل «نوع المختبر» في المادة ليختار المولّد المختبر المناسب' },
       { key: 'capacity', label: 'السعة (عدد الطلبة)', type: 'number', min: 1, required: true },
@@ -179,7 +198,7 @@ const ENTITIES = {
       { key: 'building', label: 'المبنى / الطابق' },
       { key: 'active', label: 'الحالة', type: 'checkbox', checkLabel: 'متاحة للجدولة', default: true },
     ],
-    columns: [['name', 'الاسم'], [(r) => ROOM_TYPES[r.type] || '', 'النوع'], ['labKind', 'نوع المختبر'], ['capacity', 'السعة'],
+    columns: [['name', 'الاسم'], [(r) => (r.code && r.code !== r.name ? `<code>${esc(r.code)}</code>` : ''), 'الرمز', true], [(r) => ROOM_TYPES[r.type] || '', 'النوع'], ['labKind', 'نوع المختبر'], [(r) => r.capacity || '—', 'السعة'],
       [(r) => collegeShort(r.collegeId) || 'مشتركة', 'الكلية'], ['building', 'المبنى'], [(r) => (r.active === false ? 'معطلة' : 'متاحة'), 'الحالة']],
     onDelete: (r) => store.data.sessions.filter((s) => s.roomId === r.id).map((s) => ({ op: 'update', col: 'sessions', id: s.id, data: { roomId: null } })),
   },
@@ -194,20 +213,21 @@ const ENTITIES = {
       { key: 'code', label: 'رمز المادة' },
       { key: 'theoryHours', label: 'الساعات النظرية أسبوعياً', type: 'number', min: 0, step: 0.5, default: 2 },
       { key: 'practicalHours', label: 'الساعات العملية أسبوعياً', type: 'number', min: 0, step: 0.5, default: 0 },
+      { key: 'onlineHours', label: 'ساعات نظرية إلكترونية (أونلاين)', type: 'number', min: 0, step: 0.5, default: 0, help: 'جزء النظري الذي يُدرَّس إلكترونياً، فلا يحتاج قاعة ولا يدخل في الجدول' },
       { key: 'labType', label: 'نوع المختبر المطلوب', placeholder: 'مثال: مختبر أشعة' },
       { key: 'theoryTeacherId', label: 'أستاذ النظري', type: 'select', options: teacherOptions() },
       { key: 'practicalTeacherId', label: 'أستاذ العملي', type: 'select', options: teacherOptions() },
       { key: 'combineTheory', label: 'النظري', type: 'checkbox', checkLabel: 'يُدرَّس النظري لكل شعب المرحلة معاً (في نوع الدراسة نفسه)', default: true, full: true },
     ],
     columns: [['name', 'المادة'], [(r) => deptName(r.deptId), 'القسم'], [(r) => collegeShort(collegeOfDept(r.deptId)), 'الكلية'], [(r) => STAGE_NAMES[r.stageLevel] || r.stageLevel, 'المرحلة'],
-      [(r) => r.semester || 1, 'الفصل'], ['theoryHours', 'نظري'], ['practicalHours', 'عملي'], ['labType', 'المختبر'],
+      [(r) => r.semester || 1, 'الفصل'], ['theoryHours', 'نظري'], ['practicalHours', 'عملي'], [(r) => r.onlineHours || '', 'أونلاين'], ['labType', 'المختبر'],
       [(r) => [teacherName(r.theoryTeacherId), teacherName(r.practicalTeacherId)].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(' / '), 'الأستاذ'],
       [(r) => (r.needsReview ? '<span class="chip chip-warn" title="الساعات قيم افتراضية، يرجى مراجعتها">مراجعة</span>' : ''), '', true]],
     toolbar: [
       { label: '⬆ استيراد المناهج من Excel', run: () => importSubjects() },
       { label: '⬇ نموذج ملف المناهج', run: () => downloadTemplate() },
     ],
-    beforeSave: (v) => ({ ...v, stageLevel: Number(v.stageLevel), semester: Number(v.semester), theoryHours: Number(v.theoryHours) || 0, practicalHours: Number(v.practicalHours) || 0, needsReview: false }),
+    beforeSave: (v) => ({ ...v, stageLevel: Number(v.stageLevel), semester: Number(v.semester), theoryHours: Number(v.theoryHours) || 0, practicalHours: Number(v.practicalHours) || 0, onlineHours: Number(v.onlineHours) || 0, needsReview: false }),
     onDelete: (r) => store.data.sessions.filter((s) => s.subjectId === r.id).map((s) => ({ op: 'delete', col: 'sessions', id: s.id })),
     deleteWarning: 'سيتم حذف كل محاضرات هذه المادة من الجداول.',
   },
@@ -342,7 +362,7 @@ async function deleteEntity(col, row) {
     toast('تم الحذف', 'success');
     return;
   }
-  if (col === 'teachers' && !isAdmin() && store.data.sessions.some((s) => s.teacherId === row.id && !canEditDept(s.deptId))) {
+  if (col === 'teachers' && !isAdmin() && store.data.sessions.some((s) => teachersOf(s).includes(row.id) && !canEditDept(s.deptId))) {
     toast('هذا الأستاذ مسند لمحاضرات في أقسام أو كليات أخرى. اطلب من مدير النظام حذفه.', 'error', 6000);
     return;
   }
@@ -417,7 +437,7 @@ const teacherWhere = (t) => {
 /** عدد مع المعدود بالعربية: محاضرة واحدة، محاضرتان، 3 محاضرات، 11 محاضرة */
 const countAr = (n, [one, two, few, many]) => (n === 0 ? `لا ${many}` : n === 1 ? `${one} واحدة` : n === 2 ? two : n <= 10 ? `${n} ${few}` : `${n} ${many}`);
 const usage = (t) => ({
-  sessions: store.data.sessions.filter((s) => s.teacherId === t.id).length,
+  sessions: store.data.sessions.filter((s) => teachersOf(s).includes(t.id)).length,
   subjects: store.data.subjects.filter((s) => s.theoryTeacherId === t.id || s.practicalTeacherId === t.id).length,
 });
 
@@ -465,17 +485,27 @@ function duplicateTeacherGroups() {
     if (!map.has(k)) map.set(k, []);
     map.get(k).push(t);
   }
-  return [...map.values()].filter((g) => g.length > 1);
+  // مجموعة أكّد المستخدم أنها لأشخاص مختلفين (كلهم معلَّمون) لا تظهر مرة ثانية
+  return [...map.values()].filter((g) => g.length > 1 && !g.every((t) => t.notDuplicate));
 }
 
 function duplicateTeachersBanner() {
   const cur = currentCollegeId();
   const groups = duplicateTeacherGroups().filter((g) => !cur || g.some((t) => teacherColleges(t).includes(cur)));
   if (!groups.length) return null;
-  const box = el(`<div class="banner warn">⚠️ <b>أساتذة مسجّلون أكثر من مرة:</b> سجلان للشخص نفسه يمنعان النظام من كشف تعارض أوقاته. ادمجهما في سجل واحد.
-    <div class="dup-list">${groups.map((g, i) => `<span class="dup-item">«${esc(g[0].name)}» (${g.length === 2 ? 'سجلّان' : `${g.length} سجلات`})
-      ${canMerge(g) ? `<button class="btn btn-sm" data-merge="${i}">دمج</button>` : ''}</span>`).join('')}</div></div>`);
-  box.addEventListener('click', (e) => { const b = e.target.closest('[data-merge]'); if (b) mergeTeachers(groups[b.dataset.merge]); });
+  const box = el(`<div class="banner warn">⚠️ <b>أسماء مكررة:</b> إن كان السجلّان لشخص واحد فادمجهما، لأن تكرار الأستاذ نفسه يمنع النظام من كشف تعارض أوقاته. وإن كانا شخصين مختلفين بالاسم نفسه فاضغط «أشخاص مختلفون».
+    <div class="dup-list">${groups.map((g, i) => `<span class="dup-item">«${esc(g[0].name)}» <small class="muted">(${esc([...new Set(g.map((t) => collegeShort(teacherCollege(t))))].join('، '))})</small>
+      ${canMerge(g) ? `<button class="btn btn-sm" data-merge="${i}">دمج</button>` : ''}
+      ${g.every((t) => canEditDept(t.deptId)) ? `<button class="btn btn-sm btn-ghost" data-distinct="${i}">أشخاص مختلفون</button>` : ''}</span>`).join('')}</div></div>`);
+  box.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-merge]');
+    if (b) mergeTeachers(groups[b.dataset.merge]);
+    const d = e.target.closest('[data-distinct]');
+    if (d) {
+      await batchWrite(groups[d.dataset.distinct].map((t) => ({ op: 'update', col: 'teachers', id: t.id, data: { notDuplicate: true } })));
+      toast('تم: لن يُعرض هذا الاسم كتكرار بعد الآن', 'success');
+    }
+  });
   return box;
 }
 
@@ -484,7 +514,7 @@ function canMerge(group) {
   if (isAdmin()) return true;
   const ids = new Set(group.map((t) => t.id));
   return group.every((t) => canEditDept(t.deptId))
-    && store.data.sessions.filter((s) => ids.has(s.teacherId)).every((s) => canEditDept(s.deptId))
+    && store.data.sessions.filter((s) => teachersOf(s).some((x) => ids.has(x))).every((s) => canEditDept(s.deptId))
     && store.data.subjects.filter((s) => ids.has(s.theoryTeacherId) || ids.has(s.practicalTeacherId)).every((s) => canEditDept(s.deptId));
 }
 
@@ -513,7 +543,11 @@ async function mergeTeachers(group) {
   if (!hasAvail(keep)) { const a = others.find(hasAvail); if (a) keepData.availability = a.availability; }
   for (const k of ['title', 'phone', 'email', 'maxDailyHours']) if (!keep[k]) { const o = others.find((t) => t[k]); if (o) keepData[k] = o[k]; }
   const ops = [{ op: 'update', col: 'teachers', id: keepId, data: keepData }];
-  for (const s of store.data.sessions.filter((x) => otherIds.has(x.teacherId))) ops.push({ op: 'update', col: 'sessions', id: s.id, data: { teacherId: keepId } });
+  for (const s of store.data.sessions.filter((x) => teachersOf(x).some((id) => otherIds.has(id)))) {
+    const swap = (id) => (otherIds.has(id) ? keepId : id);
+    const teacherId = swap(s.teacherId);
+    ops.push({ op: 'update', col: 'sessions', id: s.id, data: { teacherId, coTeacherIds: [...new Set((s.coTeacherIds || []).map(swap))].filter((x) => x !== teacherId) } });
+  }
   for (const s of store.data.subjects) {
     const d = {};
     if (otherIds.has(s.theoryTeacherId)) d.theoryTeacherId = keepId;

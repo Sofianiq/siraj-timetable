@@ -2,7 +2,7 @@
  * دوال مساعدة على نموذج البيانات: الأسماء المعروضة، الفصل الحالي، تصفية المحاضرات حسب طريقة العرض.
  */
 import { store, byId, settings, collegeOfDept, myCollegeId } from './store.js';
-import { buildCtx } from './conflicts.js';
+import { buildCtx, teachersOf, shiftWindow } from './conflicts.js';
 import { STAGE_NAMES, SHIFTS, SEMESTERS } from './timeutil.js';
 import { subgroupLabel } from './subgroups.js';
 
@@ -23,9 +23,15 @@ export const termSessions = (term = currentTerm()) => store.data.sessions.filter
 export function ctx() {
   return buildCtx({
     rooms: store.data.rooms, groups: store.data.groups, teachers: store.data.teachers,
-    subjects: store.data.subjects, settings: settings(),
+    subjects: store.data.subjects, departments: store.data.departments, colleges: store.data.colleges, settings: settings(),
   });
 }
+
+/** أسماء أساتذة المحاضرة (الأساسي ثم المشاركون) */
+export const teacherNames = (s, sep = ' / ') => teachersOf(s).map((id) => teacherName(id)).filter(Boolean).join(sep);
+
+/** وقت دوام الشعبة (دوام كليتها إن حُدِّد، وإلا دوام الجامعة) */
+export const groupShiftWindow = (g) => shiftWindow(ctx(), g);
 
 export const sortByName = (arr) => [...arr].sort((a, b) => String(a.name).localeCompare(String(b.name), 'ar'));
 
@@ -175,7 +181,7 @@ export function sessionsForView(type, id, term = currentTerm()) {
     case 'group': return list.filter((s) => (s.groupIds || []).includes(id));
     case 'dept': return list.filter((s) => s.deptId === id);
     case 'college': return list.filter((s) => s.deptId && collegeOfDept(s.deptId) === id);
-    case 'teacher': return list.filter((s) => s.teacherId === id);
+    case 'teacher': return list.filter((s) => teachersOf(s).includes(id));
     case 'room': return list.filter((s) => s.roomId === id);
     case 'loose': {
       const [deptId, level = ''] = String(id).split('|');
@@ -237,7 +243,7 @@ export function sessionLines(s, viewType, { withSub = true } = {}) {
   const kind = s.kind === 'practical' ? 'عملي' : s.kind === 'external' ? 'حجز' : 'نظري';
   const sub = withSub ? subgroupLabel(s) : '';
   lines.push(`${subjectName(s)} (${kind})${sub ? ` — ${sub}` : ''}`);
-  if (viewType !== 'teacher' && s.teacherId) lines.push(teacherName(s.teacherId));
+  if (viewType !== 'teacher' && teachersOf(s).length) lines.push(teacherNames(s));
   if (viewType !== 'room' && s.roomId) lines.push(roomName(s.roomId));
   if (viewType !== 'group' && s.groupIds?.length) {
     lines.push(s.groupIds.map((gid) => groupLabel(byId('groups', gid), { withDept: viewType !== 'dept' })).join(' + '));

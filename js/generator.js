@@ -336,7 +336,7 @@ export function generate(p) {
   const groupsMap = new Map((p.groups || []).map((g) => [g.id, g]));
   const fixedOcc = new Occupancy();
   for (const s of p.fixedSessions || []) {
-    fixedOcc.add('t', s.teacherId, s.day, s.start, s.end, 'fixed');
+    for (const tid of [s.teacherId, ...(s.coTeacherIds || [])]) fixedOcc.add('t', tid, s.day, s.start, s.end, 'fixed');
     fixedOcc.add('r', s.roomId, s.day, s.start, s.end, 'fixed');
     for (const g of studentKeys(s.groupIds, subsOf(s), groupsMap)) fixedOcc.add('g', g, s.day, s.start, s.end, 'fixed');
   }

@@ -22,6 +22,17 @@ export function toMinutes(hhmm) {
   return (h || 0) * 60 + (m || 0);
 }
 
+/**
+ * دوام كلية معيّنة (اختياري): حقول «morningStart/morningEnd» و«eveningStart/eveningEnd» بصيغة "08:30".
+ * يعيد {start, end} بالدقائق، أو null إن لم يُحدَّد للكلية دوام خاص (فيُستخدم دوام الجامعة من الإعدادات).
+ */
+export function collegeHours(college, shift) {
+  if (!college || !shift) return null;
+  const read = (v) => (/^\d{1,2}:\d{2}/.test(v || '') ? toMinutes(v) : null);
+  const start = read(college[`${shift}Start`]), end = read(college[`${shift}End`]);
+  return start != null && end != null && end > start ? { start, end } : null;
+}
+
 /** 510 → "08:30" */
 export function toHHMM(min) {
   const h = Math.floor(min / 60);

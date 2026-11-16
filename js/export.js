@@ -10,7 +10,8 @@ import { esc, el, loadScript, download, modal, toast } from './ui.js';
 import { settings, byId, store, collegeOfDept } from './store.js';
 import { normName } from './text.js';
 import { HMT_COLLEGE } from './seed/curriculum.js';
-import { sessionsForView, viewHeader, subjectName, teacherName, roomName, groupLabel, collegeName, stageName } from './model.js';
+import { sessionsForView, viewHeader, subjectName, teacherName, teacherNames, roomName, groupLabel, collegeName, stageName, groupShiftWindow } from './model.js';
+import { collegeHours } from './timeutil.js';
 import { themeKeyForDept, themeKeyForCollege, themeOf } from './themes.js';
 import { subsOf, subgroupColor, subgroupLabel } from './subgroups.js';
 import { UNIVERSITY } from './branding.js';
@@ -37,11 +38,21 @@ function daysText(days) {
 
 /** ترويسة الجدول المطبوع: الجهة (يمين)، العنوان (وسط)، المرحلة/الأستاذ/القاعة والفصل والعام (يسار)، ولون القسم */
 /** شعار كلية الجدول: حقل «الشعار» في صفحة الكليات، ولكلية التقنيات الصحية والطبية شعارها المرفق */
+/** شعارات الكليات المرفقة مع النظام (تُعرف الكلية من كلمات اسمها) */
+const KNOWN_LOGOS = [
+  { words: ['تقنيات', 'صحي'], src: 'assets/logo-hmt.png' },
+  { words: ['تقني', 'هندس'], src: 'assets/logo-eng.png' },
+  { words: ['صيدل'], src: 'assets/logo-pha.png' },
+];
+/** شعار الجامعة: يُطبع في الجهة المقابلة لشعار الكلية */
+export const UNIVERSITY_LOGO = 'assets/logo-siraj.png';
 export function collegeLogo(collegeId) {
   const c = byId('colleges', collegeId);
   if (!c) return '';
   if (c.logo) return c.logo;
-  return normName(c.name) === normName(HMT_COLLEGE) ? 'assets/logo-hmt.png' : '';
+  const n = normName(c.name);
+  if (n === normName(HMT_COLLEGE)) return 'assets/logo-hmt.png';
+  return KNOWN_LOGOS.find((k) => k.words.every((w) => n.includes(normName(w))))?.src || '';
 }
 
 function printInfo(type, id, days) {
@@ -62,16 +73,19 @@ function printInfo(type, id, days) {
     info.shift = g?.shift || 'morning';
     info.theme = themeKeyForDept(d?.id);
     if (d?.general) info.sign = 'عميد الكلية';
+    info.signName = d?.general ? byId('colleges', d?.collegeId)?.dean || '' : d?.head || '';
   } else if (type === 'dept') {
     const d = byId('departments', id);
     info.org.push(...deptOrg(d));
     info.meta.push(d?.general ? 'الجدول العام' : d?.short || d?.name || '');
     info.theme = themeKeyForDept(id);
+    info.signName = d?.general ? byId('colleges', d?.collegeId)?.dean || '' : d?.head || '';
   } else if (type === 'college') {
     info.org.push(collegeName(id));
     info.meta.push('الجدول العام');
     info.theme = themeKeyForCollege(id);
     info.sign = 'عميد الكلية';
+    info.signName = byId('colleges', id)?.dean || '';
   } else if (type === 'teacher') {
     const t = byId('teachers', id);
     const d = byId('departments', t?.deptId);
@@ -100,7 +114,7 @@ function printInfo(type, id, days) {
   const [y1, y2] = String(st.academicYear || '').split(/[-–]/).map((x) => x.trim());
   info.year = y2 ? `${y1} – ${y2}` : y1 || '';
   // سطر الدوام: أيام الدوام ووقت دوام الشعبة (صباحي/مسائي)
-  const sh = info.shift && st.shifts?.[info.shift];
+  const sh = info.shift && (collegeHours(byId('colleges', cid), info.shift) || st.shifts?.[info.shift]);
   info.sub = `${info.shift === 'evening' ? 'الدوام المسائي' : 'الدوام الرسمي'}: ${daysText(days)}`
     + (sh ? ` • من <b>${clock(sh.start)}</b> ${period(sh.start)} إلى <b>${clock(sh.end)}</b> ${period(sh.end)}` : '');
   return info;
@@ -140,6 +154,11 @@ export function tableModel(type, id) {
   const days = st.days?.length ? st.days : [1, 2, 3, 4, 5];
   const sessions = sessionsForView(type, id).filter((s) => days.includes(s.day));
   let from = st.printStart ?? 510, to = st.printEnd ?? 870;
+  // جدول الشعبة: محور الوقت من دوامها (المسائي يبدأ بعد الظهر، ولكل كلية دوامها إن حُدِّد)
+  const win = type === 'group' ? groupShiftWindow(byId('groups', id)) : null;
+  if (win && (byId('groups', id)?.shift === 'evening' || collegeHours(byId('colleges', collegeOfDept(byId('groups', id)?.deptId)), 'morning'))) {
+    from = win.start; to = win.end;
+  }
   if (to <= from) to = from + 420;
   for (const s of sessions) {
     while (s.start < from) from -= 60;
@@ -170,7 +189,7 @@ function cardMeta(s, type) {
   const rows = [];
   const sub = subgroupLabel(s);
   const groups = (s.groupIds || []).map((gid) => groupLabel(byId('groups', gid), { withDept: type !== 'loose' })).join(' + ') + (sub ? ` (${sub})` : '');
-  if (type !== 'teacher' && s.kind !== 'external') rows.push(['التدريسي', teacherName(s.teacherId)]);
+  if (type !== 'teacher' && s.kind !== 'external') rows.push(['التدريسي', teacherNames(s)]);
   if (type !== 'room') rows.push(['القاعة', roomName(s.roomId)]);
   if ((type === 'teacher' || type === 'room') && groups) rows.push(['الشعبة', groups]);
   if (s.kind === 'external' && s.bookedBy) rows.push(['الجهة', s.bookedBy]);
@@ -186,7 +205,7 @@ function stackHTML(st, m, span) {
   const sf = members.length <= 2 ? 1 : members.length <= 4 ? 0.9 : members.length <= 6 ? 0.8 : 0.7;
   const rows = members.map((x) => {
     const [c, bg] = subgroupColor(g, subsOf(x)[0]);
-    const meta = [teacherName(x.teacherId), roomName(x.roomId)].filter(Boolean).join(' • ');
+    const meta = [teacherNames(x), roomName(x.roomId)].filter(Boolean).join(' • ');
     return `<div class="sg-row" style="--sg:${c};--sgb:${bg}"><span class="sg-tag">${esc(subsOf(x).join('+'))}</span>
       <span class="sg-body"><span class="sg-name">${esc(subjectName(x))}${kinds.size > 1 ? ` (${KIND_LABEL[x.kind]})` : ''}</span>${meta ? `<span class="sg-meta">${esc(meta)}</span>` : ''}${sameTime ? '' : `<span class="sg-time">${rangeHTML(x.start, x.end)}</span>`}</span></div>`;
   }).join('');
@@ -254,8 +273,8 @@ export function tableHTML(m, { page = 1, pages = 1 } = {}) {
       <header class="sh-head">
         <div class="sh-org">${p.logo ? `<img class="sh-logo" src="${esc(p.logo)}" alt="">` : ''}<div class="sh-org-t">${p.org.map((x, i) => `<div class="o${i}">${esc(x)}</div>`).join('')}</div></div>
         <div class="sh-title"><h1>${esc(p.title)}</h1><div class="sub">${p.sub}</div></div>
-        <div class="sh-meta">${meta.map((x, i) => `<div class="m${i}">${p.metaHTML && i === 0 ? x : esc(x)}</div>`).join('')}
-          ${p.year ? `<div class="yr">العام الدراسي <b>${esc(p.year)}</b></div>` : ''}</div>
+        <div class="sh-meta"><div class="sh-meta-t">${meta.map((x, i) => `<div class="m${i}">${p.metaHTML && i === 0 ? x : esc(x)}</div>`).join('')}
+          ${p.year ? `<div class="yr">العام الدراسي <b>${esc(p.year)}</b></div>` : ''}</div><img class="sh-logo uni" src="${UNIVERSITY_LOGO}" alt=""></div>
       </header>
       <div class="sh-body"><table class="sh-grid">
         <colgroup><col class="c-day">${m.slots.map(() => '<col>').join('')}</colgroup>
@@ -266,7 +285,7 @@ export function tableHTML(m, { page = 1, pages = 1 } = {}) {
       <footer class="sh-foot">
         <div class="issued">تاريخ الإصدار: <span dir="ltr">${esc(new Date().toLocaleDateString('en-GB'))}</span>${pages > 1 ? ` &nbsp;•&nbsp; صفحة ${page} من ${pages}` : ''}</div>
         <div class="legend"><span class="lg th"></span>نظري <span class="lg pr"></span>عملي${m.hasSubgroups ? ' <span class="lg sg"></span>مجاميع العملي' : ''}</div>
-        <div class="sign"><div class="line"></div><div>${esc(p.sign)}</div></div>
+        <div class="sign"><div class="line"></div>${p.signName ? `<div class="sign-n">${esc(p.signName)}</div>` : ''}<div>${esc(p.sign)}</div></div>
       </footer>
     </div>
   </div>`;
@@ -527,14 +546,14 @@ export async function exportExcel(tables, filename) {
         const cell = ws.getCell(row, c1);
         const listRow = (x) => listRows.push([plain(`${p.meta[0]} — ${p.org.slice(1).join(' — ')}`), DAY_NAMES[x.day], formatTime(x.start), formatTime(x.end),
           subjectName(x) + (x.kind === 'practical' ? ' (عملي)' : x.kind === 'external' ? ' (حجز)' : ' (نظري)'),
-          teacherName(x.teacherId), roomName(x.roomId), (x.groupIds || []).map((g) => groupLabel(byId('groups', g), { withDept: true })).join(' + ') + (subgroupLabel(x) ? ` (${subgroupLabel(x)})` : '')]);
+          teacherNames(x), roomName(x.roomId), (x.groupIds || []).map((g) => groupLabel(byId('groups', g), { withDept: true })).join(' + ') + (subgroupLabel(x) ? ` (${subgroupLabel(x)})` : '')]);
         if (s.stack) {
           // خانة مكدّسة: سطر لكل مجموعة عملي بلونها
           const { g, members } = stackMembers(s);
           const runs = [{ text: `${KIND_LABEL[members[0].kind] || 'عملي'}  |  ${clockRange(s.start, s.end)}  —  ${groupsCountAr(members.length)}`, font: { name: TNR, size: 10, bold: true, color: { argb: argb(th.accent) } } }];
           for (const x of members) {
             const [c] = subgroupColor(g, subsOf(x)[0]);
-            const meta = [teacherName(x.teacherId), roomName(x.roomId)].filter(Boolean).join(' • ');
+            const meta = [teacherNames(x), roomName(x.roomId)].filter(Boolean).join(' • ');
             const time = x.start === s.start && x.end === s.end ? '' : `  (${clockRange(x.start, x.end)})`;
             runs.push({ text: `\n${subsOf(x).join('+')}: `, font: { name: TNR, size: 11, bold: true, color: { argb: argb(c) } } });
             runs.push({ text: `${subjectName(x)}${meta ? ` — ${meta}` : ''}${time}`, font: { name: TNR, size: 10, color: { argb: 'FF1B262C' } } });
