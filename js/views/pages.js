@@ -14,7 +14,7 @@ import {
 } from '../model.js';
 import { openEditor } from './schedule.js';
 import { curriculumImportPlan } from '../seed/curriculum.js';
-import { openUniversityImport, universityImportPending } from './university-import.js';
+import { openUniversityImport, universityImportPending, universityImportIsUpdate } from './university-import.js';
 
 export const ROLE_NAMES = {
   admin: 'مدير النظام (كل الكليات)', college: 'معاون عميد (كلية واحدة)', dept: 'مسؤول قسم', viewer: 'عرض فقط', guest: 'زائر',
@@ -43,8 +43,10 @@ export function renderDashboard(container) {
   container.innerHTML = '';
   const page = el(`<div class="page">
     <div class="page-head"><h2>لوحة التحكم</h2>${cur ? `<span class="term-badge">🏛 ${esc(collegeName(cur))}</span>` : ''}<span class="term-badge">${esc(termLabel())}</span></div>
-    ${universityImportPending() ? `<div class="banner info uimp-banner"><span>🏛 <b>جداول كليات الجامعة جاهزة للاستيراد:</b> الكلية التقنية الهندسية، والإدارة والاقتصاد، والصيدلة، وطب الأسنان — بموادها وكادرها وقاعاتها المرمّزة ومحاضرات كل قسم ومرحلة.</span>
-      <button class="btn btn-primary btn-sm" id="uimp">معاينة واستيراد</button></div>` : ''}
+    ${universityImportPending() ? `<div class="banner info uimp-banner"><span>🏛 ${universityImportIsUpdate()
+      ? '<b>تحديث بيانات الجامعة جاهز:</b> ترميز القاعات المحدَّث — لكل كلية قاعاتها، وتحويل الرموز التي أصبحت مكاتب.'
+      : '<b>جداول كليات الجامعة جاهزة للاستيراد:</b> الكلية التقنية الهندسية، والإدارة والاقتصاد، والصيدلة، وطب الأسنان — بموادها وكادرها وقاعاتها المرمّزة ومحاضرات كل قسم ومرحلة.'}</span>
+      <button class="btn btn-primary btn-sm" id="uimp">معاينة و${universityImportIsUpdate() ? 'تحديث' : 'استيراد'}</button></div>` : ''}
     ${isAdmin() && (daysSinceBackup === null || daysSinceBackup > 7) ? `<div class="banner warn">💾 ${daysSinceBackup === null ? 'لم تُؤخذ نسخة احتياطية بعد.' : `آخر نسخة احتياطية قبل ${daysSinceBackup} يوم.`} <a href="#/settings">خذ نسخة الآن</a></div>` : ''}
     ${!cur && colleges.length > 1 ? `<div class="college-cards">${colleges.map((c) => {
       const cs = allSessions.filter((x) => x.deptId && collegeOfDept(x.deptId) === c.id);

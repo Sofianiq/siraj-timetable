@@ -101,7 +101,10 @@ test('university import: matches existing colleges/departments, fills structure,
   // القاعات: تُطابَق بالرمز والاسم ولا تتكرر
   assert.equal(after.rooms.filter((r) => r.name === 'SE201').length, 1);
   assert.equal(after.rooms.filter((r) => r.name === 'مختبر الحاسوب').length, 1);
-  assert.equal(after.rooms.length, ROOMS.length);
+  // لكل كلية قاعاتها: مختبر حاسوب الصيدلة منفصل عن مختبر التقنيات الصحية
+  assert.equal(after.rooms.find((r) => r.name === 'مختبر الحاسوب – الصيدلة').collegeId, 'ph');
+  assert.equal(after.rooms.find((r) => r.name === 'SE201').collegeId, 'en');
+  assert.equal(after.rooms.length, ROOMS.length + 1);
   // إعادة الاستيراد لا تكتب شيئاً
   const again = universityImportPlan(after, ids());
   assert.equal(again.ops.length, 0, JSON.stringify(again.ops.slice(0, 3)));
@@ -154,4 +157,22 @@ test('v6 migration clears college-specific morning hours so every college follow
   // كل الكليات على الدوام الصباحي الموحّد، والمسائي الخاص بالهندسية باقٍ
   for (const c of after.colleges) assert.ok(!c.morningStart && !c.morningEnd, c.name);
   assert.deepEqual(shiftWindow({ ...ctx, settings: after.settings[0] }, { deptId: 'd1', shift: 'morning' }), { start: 510, end: 900 });
+});
+
+test('updated room codes: offices are retired (deleted if unused, disabled if used) and rooms of another college raise a warning', () => {
+  const data = base();
+  data.rooms.push({ id: 'old11', name: 'SE011', code: 'SE011', type: 'hall' }, { id: 'old12', name: 'SE012', code: 'SE012', type: 'hall', collegeId: 'ec' });
+  data.sessions.push({ id: 'keep12', term: '2026-2027/1', deptId: 'acc', roomId: 'old12', day: 0, start: 510, end: 570, groupIds: [] });
+  const { ops, report } = universityImportPlan(data, ids());
+  const after = apply(data, ops);
+  assert.ok(!after.rooms.some((r) => r.id === 'old11'), 'unused office code deleted');
+  assert.equal(after.rooms.find((r) => r.id === 'old12').active, false, 'used office code disabled');
+  assert.deepEqual(report.retiredRooms.map((r) => [r.code, r.action]).sort(), [['SE011', 'deleted'], ['SE012', 'disabled']]);
+  // محاضرة لقسم المحاسبة في قاعة الكلية التقنية الهندسية → تنبيه
+  const ctx = buildCtx({ ...after, settings: after.settings[0] });
+  const se201 = after.rooms.find((r) => r.name === 'SE201');
+  const res = checkAll([{ id: 'x', term: 't', deptId: 'acc', kind: 'theory', roomId: se201.id, day: 0, start: 510, end: 570, groupIds: [] }], ctx);
+  assert.ok(res.get('x').some((i) => i.type === 'roomOwner'));
+  // إعادة الاستيراد بعد التحديث لا تكتب شيئاً
+  assert.equal(universityImportPlan(after, ids()).ops.length, 0);
 });

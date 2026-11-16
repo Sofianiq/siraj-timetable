@@ -169,10 +169,15 @@ export function buildDemands({ subjects, stages, groups, settings, keptSessions,
 
 /** القاعات المرشحة مع عقوبة الملاءمة */
 function roomOptions(d, rooms, deptCollege) {
+  // لكل كلية قاعاتها: تُستبعد قاعات الكليات الأخرى ما دامت للكلية (أو المشتركة) قاعات من النوع المطلوب
+  const usable = (r) => r.active !== false && (!deptCollege || !r.collegeId || r.collegeId === deptCollege);
+  const ownLab = rooms.some((r) => usable(r) && r.type === 'lab');
+  const ownHall = rooms.some((r) => usable(r) && r.type !== 'lab');
   const anyLab = rooms.some((r) => r.type === 'lab');
   const opts = [];
   for (const r of rooms) {
     if (r.active === false) continue;
+    if (!usable(r) && (d.kind === 'practical' ? ownLab : ownHall)) continue;
     let pen = 0;
     if (d.kind === 'practical') {
       if (r.type !== 'lab') { if (anyLab) continue; pen += 30; }

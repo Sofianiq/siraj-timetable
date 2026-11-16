@@ -13,11 +13,14 @@ const SOURCE_NOTES = [
   'الذكاء الاصطناعي: جدول المرحلة الثانية المسائي نسخة من الصباحي مزاحة 4 ساعات بالأساتذة والقاعات أنفسهم، فيتداخل الأساتذة بين الدراستين بعد الظهر.',
   'البناء والإنشاءات: «الجيولوجيا الهندسية» يوم الثلاثاء نظري في الجدول الصباحي و«مختبر» في المسائي؛ استُورد كما ورد في كل جدول.',
   'الدوام الرسمي الموحّد 8:30 – 3:00: المحاضرات التي تتجاوزه في الجداول الأصلية (الصيدلة حتى 3:30، وطب الأسنان حتى 4:30، والمرحلة الثانية الصباحية للذكاء الاصطناعي حتى 3:30) تُستورد كما هي ويظهر لها تنبيه «خارج وقت الدوام» لإعادة جدولتها.',
+  'لكل كلية قاعاتها حسب الترميز المحدَّث: القاعات المرمّزة تُسجَّل باسم كليتها المالكة، والتوليد التلقائي يستخدم قاعات الكلية والمشتركة فقط، ويظهر تنبيه عند حجز قاعة كلية أخرى.',
   'القاعات الجديدة أُضيفت بلا سعة لأن الملفات لا تذكرها؛ أدخل سعة كل قاعة من صفحة «القاعات والمختبرات» ليُفعَّل تنبيه تجاوز السعة.',
 ];
 
 /** هل الاستيراد متاح ولم يُنفَّذ بعد بالإصدار الحالي من البيانات؟ */
 export const universityImportPending = () => isAdmin() && (settings().universityImport?.version || 0) < DATA_VERSION;
+/** استُوردت الجداول سابقاً بإصدار أقدم من البيانات (التحديث الحالي: ترميز القاعات المحدَّث) */
+export const universityImportIsUpdate = () => (settings().universityImport?.version || 0) > 0;
 
 export async function openUniversityImport() {
   const st = settings();
@@ -47,6 +50,7 @@ export async function openUniversityImport() {
     ${r.similarTeachers.length ? `<details class="uimp-det"><summary>👨‍🏫 ${r.similarTeachers.length} اسم أستاذ يطابق اسماً في كادر كلية أخرى (لم يُدمج تلقائياً)</summary>
       <ul>${r.similarTeachers.map((t) => `<li>«${esc(t.name)}» في ${esc(t.college)} — يشبه: ${t.other.map(esc).join('، ')}</li>`).join('')}</ul>
       <p class="muted">إن كان الاسمان لشخص واحد فادمجهما من صفحة «الأساتذة» (زر «دمج») ليكشف النظام تعارض أوقاته بين الكليتين، وإلا اضغط «أشخاص مختلفون».</p></details>` : ''}
+    ${r.retiredRooms.length ? `<div class="banner warn">🚪 الترميز المحدَّث حوّل ${r.retiredRooms.length === 1 ? 'رمزاً' : `${r.retiredRooms.length} رموز`} إلى مكاتب: ${r.retiredRooms.map((x) => `<b>${esc(x.code)}</b> (${esc(x.label)}) — ${x.action === 'deleted' ? 'تُحذف من القاعات' : 'تُعطَّل لأنها مستخدمة في محاضرات'}`).join('، ')}</div>` : ''}
     <details class="uimp-det"><summary>🚪 ${SKIPPED_ROOMS.length} غرفة في ملف الترميز ليست قاعات دراسية فلم تُضف</summary>
       <p class="muted">${SKIPPED_ROOMS.map(([c, l]) => `${esc(c)} (${esc(l)})`).join('، ')}</p></details>
     <details class="uimp-det" open><summary>📝 ملاحظات من الجداول الأصلية</summary><ul>${SOURCE_NOTES.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></details>

@@ -462,16 +462,23 @@ export async function openEditor(session, defaults = {}) {
     toast(`أُضيف «${t.name}» إلى كادر ${collegeName(cid)} كأستاذ مشترك`, 'info', 5000);
     return [{ op: 'update', col: 'teachers', id: t.id, data: { sharedColleges: [...new Set([...(t.sharedColleges || []), cid])] } }];
   }
-  /** القاعات مشتركة على مستوى الجامعة؛ يظهر اسم الكلية المالكة إن كانت غير كلية المحاضرة */
+  /** لكل كلية قاعاتها: قاعات كلية المحاضرة ومختبراتها أولاً، ثم المشتركة، وقاعات الكليات الأخرى أخيراً (مع تنبيه عند اختيارها) */
   function refreshRooms() {
     const cid = collegeOfDept(f('deptId').value) || editorCollege;
     const keep = f('roomId').value || s.roomId;
-    const rs = sortByName(store.data.rooms).sort((a, b) => (a.collegeId === cid ? 0 : 1) - (b.collegeId === cid ? 0 : 1));
-    const grp = (type, label) => {
-      const list = rs.filter((r) => (r.type || 'hall') === type && (r.active !== false || r.id === keep));
-      return list.length ? `<optgroup label="${label}">${list.map((r) => `<option value="${r.id}" ${r.id === keep ? 'selected' : ''}>${esc(r.name)}${r.capacity ? ` (سعة ${r.capacity})` : ''}${r.labKind ? ` — ${esc(r.labKind)}` : ''}${r.collegeId && r.collegeId !== cid ? ` — ${esc(collegeShort(r.collegeId))}` : ''}</option>`).join('')}</optgroup>` : '';
-    };
-    f('roomId').innerHTML = '<option value="">— بدون —</option>' + grp('hall', 'القاعات') + grp('lab', 'المختبرات') + grp('other', 'أخرى');
+    const rs = sortByName(store.data.rooms).filter((r) => r.active !== false || r.id === keep);
+    const opt = (r, tag = '') => `<option value="${r.id}" ${r.id === keep ? 'selected' : ''}>${esc(r.name)}${r.capacity ? ` (سعة ${r.capacity})` : ''}${r.labKind ? ` — ${esc(r.labKind)}` : ''}${tag}</option>`;
+    const grp = (list, label, tag) => (list.length ? `<optgroup label="${esc(label)}">${list.map((r) => opt(r, tag?.(r))).join('')}</optgroup>` : '');
+    const own = rs.filter((r) => cid && r.collegeId === cid);
+    const shared = rs.filter((r) => !r.collegeId);
+    const other = rs.filter((r) => r.collegeId && r.collegeId !== cid);
+    const name = cid ? collegeShort(cid) : '';
+    f('roomId').innerHTML = '<option value="">— بدون —</option>'
+      + grp(own.filter((r) => (r.type || 'hall') === 'hall'), `قاعات ${name}`)
+      + grp(own.filter((r) => r.type === 'lab'), `مختبرات ${name}`)
+      + grp(own.filter((r) => r.type === 'other'), `أخرى — ${name}`)
+      + grp(shared, 'قاعات مشتركة')
+      + grp(other, 'قاعات كليات أخرى', (r) => ` — ${esc(collegeShort(r.collegeId))}`);
   }
   function values() {
     const kind = f('kind').value;

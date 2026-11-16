@@ -117,6 +117,12 @@ export function checkSession(s, all, ctx) {
       issues.push({ level: 'warning', type: 'capacity',
         message: `عدد الطلبة (${n}) يتجاوز سعة ${room.name} (${room.capacity})` });
     }
+    // لكل كلية قاعاتها: محاضرة في قاعة مملوكة لكلية أخرى (الحجوزات الخارجية مستثناة)
+    const sCollege = ctx.departments?.get(s.deptId)?.collegeId;
+    if (s.kind !== 'external' && room.collegeId && sCollege && room.collegeId !== sCollege) {
+      const owner = ctx.colleges?.get(room.collegeId);
+      issues.push({ level: 'warning', type: 'roomOwner', message: `${room.name} من قاعات ${owner?.name || 'كلية أخرى'}` });
+    }
     const subj = ctx.subjects.get(s.subjectId);
     if (s.kind === 'practical' && room.type !== 'lab') {
       issues.push({ level: 'warning', type: 'roomType', message: `المحاضرة عملية لكن ${room.name} ليست مختبراً` });

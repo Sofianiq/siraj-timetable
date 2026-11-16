@@ -185,7 +185,7 @@ const ENTITIES = {
   },
   rooms: {
     title: 'القاعات والمختبرات', single: 'قاعة/مختبر', icon: '🚪', collegeScoped: (r) => r.collegeId, sharedWhenEmpty: true,
-    help: 'القاعات والمختبرات مشتركة بين كل الكليات، ولا يمكن حجز قاعة لمحاضرتين في الوقت نفسه في أي كلية. «الكلية المالكة» للتنظيم وأولوية التوليد التلقائي فقط.',
+    help: 'لكل كلية قاعاتها ومختبراتها (حسب الترميز الرسمي)، والقاعة بلا كلية مالكة مشتركة بين الكليات. التوليد التلقائي يستخدم قاعات كلية المحاضرة والمشتركة فقط، ويظهر تنبيه عند حجز قاعة كلية أخرى. ولا يمكن حجز قاعة لمحاضرتين في الوقت نفسه على مستوى الجامعة.',
     canEdit: (r) => isAdmin() || canEditCollege(r ? r.collegeId : myCollegeId()),
     fields: () => [
       { key: 'name', label: 'الاسم', required: true, placeholder: 'مثال: القاعة 5 أو مختبر الأشعة 2' },
@@ -201,6 +201,9 @@ const ENTITIES = {
     columns: [['name', 'الاسم'], [(r) => (r.code && r.code !== r.name ? `<code>${esc(r.code)}</code>` : ''), 'الرمز', true], [(r) => ROOM_TYPES[r.type] || '', 'النوع'], ['labKind', 'نوع المختبر'], [(r) => r.capacity || '—', 'السعة'],
       [(r) => collegeShort(r.collegeId) || 'مشتركة', 'الكلية'], ['building', 'المبنى'], [(r) => (r.active === false ? 'معطلة' : 'متاحة'), 'الحالة']],
     onDelete: (r) => store.data.sessions.filter((s) => s.roomId === r.id).map((s) => ({ op: 'update', col: 'sessions', id: s.id, data: { roomId: null } })),
+    // لكل كلية قاعاتها: الترتيب حسب الكلية المالكة (المشتركة أخيراً)، ثم الاسم بترتيب طبيعي (SE009 قبل SE101)
+    sort: (a, b) => (byId('colleges', a.collegeId)?.order ?? 999) - (byId('colleges', b.collegeId)?.order ?? 999)
+      || String(a.name).localeCompare(String(b.name), 'ar', { numeric: true }),
   },
   subjects: {
     title: 'المواد الدراسية', single: 'مادة', icon: '📘', deptScoped: true, collegeScoped: (r) => collegeOfDept(r.deptId),

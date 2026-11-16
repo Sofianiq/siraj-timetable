@@ -49,7 +49,7 @@ function titleOf(name) {
 export function universityImportPlan(data, uid, { replace = false } = {}) {
   const ops = [];
   const count = () => ({ colleges: 0, departments: 0, stages: 0, groups: 0, rooms: 0, teachers: 0, subjects: 0, sessions: 0 });
-  const report = { created: count(), updated: count(), colleges: [], departments: [], warnings: [], similarTeachers: [], replaced: 0, existingOther: 0 };
+  const report = { created: count(), updated: count(), colleges: [], departments: [], warnings: [], similarTeachers: [], retiredRooms: [], replaced: 0, existingOther: 0 };
   const term = `${TERM.year}/${TERM.semester}`;
   const colleges = [...(data.colleges || [])];
   const departments = [...(data.departments || [])];
@@ -155,17 +155,34 @@ export function universityImportPlan(data, uid, { replace = false } = {}) {
       const patch = {};
       if (code && !r.code) patch.code = code;
       if (building && !r.building) patch.building = building;
-      if (!r.collegeId && college && collegeId[college]) patch.collegeId = collegeId[college];
+      // القاعات المرمّزة: الكلية المالكة حسب الترميز الرسمي (لكل كلية قاعاتها). غير المرمّزة: تُكمَّل الكلية إن كانت فارغة فقط
+      const owner = (college && collegeId[college]) || null;
+      if (code && owner && r.collegeId !== owner) patch.collegeId = owner;
+      else if (!r.collegeId && owner) patch.collegeId = owner;
+      if (code && r.active === false) patch.active = true;
       if (Object.keys(patch).length) { ops.push({ op: 'update', col: 'rooms', id: r.id, data: patch }); report.updated.rooms++; }
       roomId[key] = r.id;
     } else {
       const id = uid();
       const doc = { name, code: code || '', type, labKind: '', capacity: null, collegeId: collegeId[college] || null,
-        deptId: dept ? deptId[`${college}/${dept}`] || null : null, building: building || '', active: true };
+        deptId: dept ? deptId[`${college}/${dept}`] || null : null, building: building || '', active: true, source: 'university' };
       ops.push({ op: 'set', col: 'rooms', id, data: doc });
       rooms.push({ id, ...doc });
       roomId[key] = id;
       report.created.rooms++;
+    }
+  }
+  // رموز أصبحت مكاتب في الترميز المحدَّث (مثل SE011 قسم التسجيل): تُحذف القاعة إن لم تُستخدم، وإلا تُعطَّل حتى لا تُحجز
+  for (const [code, label] of SKIPPED_ROOMS) {
+    for (const r of rooms.filter((x) => codeKey(x.code) === codeKey(code) || codeKey(x.name) === codeKey(code))) {
+      if ((data.sessions || []).some((s) => s.roomId === r.id)) {
+        if (r.active === false) continue;
+        ops.push({ op: 'update', col: 'rooms', id: r.id, data: { active: false } });
+        report.retiredRooms.push({ code, label, action: 'disabled' });
+      } else {
+        ops.push({ op: 'delete', col: 'rooms', id: r.id });
+        report.retiredRooms.push({ code, label, action: 'deleted' });
+      }
     }
   }
 
