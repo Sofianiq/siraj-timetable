@@ -376,7 +376,7 @@ async function editAvailability(t) {
   if (!ENTITIES.teachers.canEdit(t)) { toast('للعرض فقط', 'warn'); return; }
   const st = settings();
   const days = st.days?.length ? st.days : [1, 2, 3, 4, 5];
-  const from = st.dayStart ?? 510, to = st.dayEnd ?? 870;
+  const from = st.dayStart ?? 510, to = st.dayEnd ?? 900;
   const hours = [];
   for (let m = from; m < to; m += 60) hours.push(m);
   const av = t.availability || {};

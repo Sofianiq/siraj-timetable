@@ -207,7 +207,7 @@ export function renderUsers(container) {
 /* =============================== الإعدادات والنسخ الاحتياطي =============================== */
 export function renderSettings(container) {
   const s = { ...settings() };
-  const sh = s.shifts || { morning: { start: 510, end: 870 }, evening: { start: 870, end: 1200 } };
+  const sh = s.shifts || { morning: { start: 510, end: 900 }, evening: { start: 870, end: 1200 } };
   const days = new Set(s.days || [1, 2, 3, 4, 5]);
   container.innerHTML = '';
   const page = el(`<div class="page">
@@ -219,14 +219,14 @@ export function renderSettings(container) {
           <small class="muted">لكل فصل جداول مستقلة. تغيير الفصل يعرض جداوله.</small></div>
         <div class="field full"><label>أيام الدوام</label><div class="checklist inline">${DAY_NAMES.map((d, i) => `<label class="chk"><input type="checkbox" name="day" value="${i}" ${days.has(i) ? 'checked' : ''}> ${d}</label>`).join('')}</div></div>
         <div class="field"><label>بداية اليوم في الجدول</label><input type="time" id="ds" value="${toHHMM(s.dayStart ?? 510)}"></div>
-        <div class="field"><label>نهاية اليوم في الجدول</label><input type="time" id="de" value="${toHHMM(s.dayEnd ?? 870)}"></div>
+        <div class="field"><label>نهاية اليوم في الجدول</label><input type="time" id="de" value="${toHHMM(s.dayEnd ?? 900)}"></div>
         <div class="field"><label>الدوام الصباحي: من</label><input type="time" id="ms" value="${toHHMM(sh.morning.start)}"></div>
         <div class="field"><label>الدوام الصباحي: إلى</label><input type="time" id="me" value="${toHHMM(sh.morning.end)}"></div>
         <div class="field"><label>الدوام المسائي: من</label><input type="time" id="es" value="${toHHMM(sh.evening.start)}"></div>
         <div class="field"><label>الدوام المسائي: إلى</label><input type="time" id="ee" value="${toHHMM(sh.evening.end)}"></div>
         <div class="field"><label>الجدول المطبوع: من الساعة</label><input type="time" id="ps" value="${toHHMM(s.printStart ?? 510)}">
           <small class="muted">أعمدة الساعات في PDF والطباعة وExcel. تتسع تلقائياً لأي محاضرة خارجها.</small></div>
-        <div class="field"><label>الجدول المطبوع: إلى الساعة</label><input type="time" id="pe" value="${toHHMM(s.printEnd ?? 870)}"></div>
+        <div class="field"><label>الجدول المطبوع: إلى الساعة</label><input type="time" id="pe" value="${toHHMM(s.printEnd ?? 900)}"></div>
         <div class="field"><label>دقة تحريك الوقت (دقيقة)</label><select id="slot">${[5, 10, 15, 30, 60].map((m) => `<option ${m === (s.slotMinutes || 30) ? 'selected' : ''}>${m}</option>`).join('')}</select>
           <small class="muted">عند السحب والإفلات يُقرَّب الوقت لأقرب مضاعف لهذه القيمة.</small></div>
       </div>

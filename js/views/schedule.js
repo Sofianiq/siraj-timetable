@@ -184,7 +184,7 @@ export function renderSchedule(container, params = {}, { publicMode = false } = 
 
   /** نطاق الساعات: الدوام من الإعدادات، ويتسع بساعات كاملة لأي محاضرة خارجه حتى لا تُقص */
   function gridRange(list) {
-    let dayStart = st.dayStart ?? 510, dayEnd = st.dayEnd ?? 870;
+    let dayStart = st.dayStart ?? 510, dayEnd = st.dayEnd ?? 900;
     // جدول الشعبة: من دوامها (المسائي أو دوام كليتها إن حُدِّد)
     const win = state.type === 'group' ? groupShiftWindow(byId('groups', state.id)) : null;
     if (win && (byId('groups', state.id)?.shift === 'evening' || collegeHours(byId('colleges', collegeOfDept(byId('groups', state.id)?.deptId)), 'morning'))) {
@@ -192,8 +192,8 @@ export function renderSchedule(container, params = {}, { publicMode = false } = 
     }
     if (dayEnd <= dayStart) dayEnd = dayStart + 360;
     for (const s of list) {
-      while (s.start < dayStart) dayStart -= 60;
-      while (s.end > dayEnd) dayEnd += 60;
+      while (s.start < dayStart) dayStart -= 30;
+      while (s.end > dayEnd) dayEnd += 30;
     }
     return { dayStart, dayEnd };
   }

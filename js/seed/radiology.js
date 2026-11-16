@@ -18,7 +18,7 @@ export const EXTRA_COLLEGES = [
   { name: 'كلية طب الأسنان', short: 'طب الأسنان', order: 3, stages: 5 },
 ];
 export const OTHER_COLLEGES_NAME = 'جهات أخرى (خارج النظام)';
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export const DEPARTMENTS = [
   { key: 'rad', name: 'قسم تقنيات الأشعة والسونار', short: 'الأشعة' },
@@ -44,18 +44,20 @@ export const SAMPLE_ROOMS = [
   { name: 'مختبر التمريض', type: 'lab', labKind: 'مختبر تمريض', capacity: 35 },
 ];
 
-/** الدوام الرسمي للكلية: من 8:30 صباحاً إلى 2:30 ظهراً */
-export const WORK_HOURS = { start: 510, end: 870 };
+/** الدوام الرسمي الموحّد لكل كليات الجامعة وأقسامها: من 8:30 صباحاً إلى 3:00 مساءً */
+export const WORK_HOURS = { start: 510, end: 900 };
+/** أيام الدوام الرسمي: من السبت إلى الأربعاء (خمسة أيام) */
+export const WORK_DAYS = [0, 1, 2, 3, 4];
 
 export const DEFAULT_SETTINGS = {
   academicYear: '2026-2027',
   semester: 1,
-  days: [0, 1, 2, 3, 4],          // السبت → الأربعاء
+  days: [...WORK_DAYS],           // السبت → الأربعاء
   dayStart: WORK_HOURS.start,     // 8:30
-  dayEnd: WORK_HOURS.end,         // 2:30
+  dayEnd: WORK_HOURS.end,         // 3:00
   slotMinutes: 30,
   printStart: WORK_HOURS.start,   // الجدول المطبوع: من 8:30
-  printEnd: WORK_HOURS.end,       // إلى 2:30
+  printEnd: WORK_HOURS.end,       // إلى 3:00
   schemaVersion: SCHEMA_VERSION,
   shifts: { morning: { ...WORK_HOURS }, evening: { start: 870, end: 1200 } },
   maxTheoryBlock: 2,
@@ -127,7 +129,8 @@ export function seedOps(uid) {
 /**
  * ترقية البيانات الموجودة إلى الإصدار الحالي. تُنفَّذ مرة واحدة فقط عند دخول مدير النظام.
  * - الإصدار 2 (عدة كليات): تُضاف كليتا الصيدلة وطب الأسنان، ويُرتّب ظهور الكليات.
- * - الإصدار 5: الدوام 8:30 – 2:30، وتصحيح المختبرات المسجّلة كقاعات، واستيراد المناهج الرسمية والكادر التدريسي لكلية التقنيات.
+ * - الإصدار 5: تصحيح المختبرات المسجّلة كقاعات، واستيراد المناهج الرسمية والكادر التدريسي لكلية التقنيات.
+ * - الإصدار 6: الدوام الرسمي الموحّد لكل الكليات: من السبت إلى الأربعاء، 8:30 – 3:00 (ويُلغى الدوام الصباحي الخاص بأي كلية).
  * - الإصدار 4: كل كلية مُدارة من الكليتين بلا أقسام يُنشأ لها «قسم عام» بمراحله وشعبه (لإضافة الأساتذة والجداول).
  * - الإصدار 3: إذا كانت الصيدلة أو طب الأسنان مسجّلة سابقاً كـ«جهة خارجية» تُحوَّل إلى كلية مُدارة (وتُدمج النسخ المكررة)،
  *   وتُنشأ شعبة «صباحي» لكل مرحلة ليس لها شعب، وتُربط المحاضرات غير المرتبطة بشعبة بشعبة مرحلة مادتها.
@@ -221,11 +224,6 @@ export function migrationPlan(data, uid) {
   }
 
   if (version < 5) {
-    // الدوام الرسمي 8:30 – 2:30 (أعمدة الجدول على الشاشة وفي الطباعة، والدوام الصباحي)
-    const shifts = { ...(s.shifts || {}), morning: { ...WORK_HOURS } };
-    if (!shifts.evening) shifts.evening = { start: 870, end: 1200 };
-    Object.assign(settingsPatch, { dayStart: WORK_HOURS.start, dayEnd: WORK_HOURS.end, printStart: WORK_HOURS.start, printEnd: WORK_HOURS.end, shifts });
-    notes.push('الدوام من 8:30 إلى 2:30');
     // مختبر مسجّل كقاعة (يسبب تنبيه «ليست مختبراً» لكل محاضرة عملية فيه)
     const labs = (data.rooms || []).filter((r) => r.type !== 'lab' && /^مختبر/.test(normName(r.name)));
     for (const r of labs) ops.push({ op: 'update', col: 'rooms', id: r.id, data: { type: 'lab' } });
@@ -235,6 +233,18 @@ export function migrationPlan(data, uid) {
     ops.push(...imp.ops);
     if (imp.stats.added || imp.stats.updated) notes.push(`استيراد المناهج الرسمية: ${imp.stats.added} مادة جديدة وتحديث ${imp.stats.updated} مادة بالساعات النظرية والعملية`);
     if (imp.stats.teachers) notes.push(`إضافة ${imp.stats.teachers} أستاذاً بدون تكرار`);
+  }
+
+  if (version < 6) {
+    // الدوام الرسمي الموحّد للجامعة (أعمدة الجدول على الشاشة وفي الطباعة، والدوام الصباحي، وأيام الدوام)
+    const shifts = { ...(s.shifts || {}), morning: { ...WORK_HOURS } };
+    if (!shifts.evening) shifts.evening = { start: 870, end: 1200 };
+    Object.assign(settingsPatch, { days: [...WORK_DAYS], dayStart: WORK_HOURS.start, dayEnd: WORK_HOURS.end, printStart: WORK_HOURS.start, printEnd: WORK_HOURS.end, shifts });
+    // الدوام الصباحي الخاص بأي كلية يُلغى فتتبع كلها الدوام الموحّد (الدوام المسائي الخاص يبقى)
+    for (const c of colleges) {
+      if (c.morningStart || c.morningEnd) ops.push({ op: 'update', col: 'colleges', id: c.id, data: { morningStart: '', morningEnd: '' } });
+    }
+    notes.push('الدوام الرسمي لكل الكليات والأقسام من السبت إلى الأربعاء، من 8:30 صباحاً إلى 3:00 مساءً');
   }
 
   // تحديث واحد لوثيقة الإعدادات (لا تُكتب الوثيقة نفسها مرتين في الدفعة)

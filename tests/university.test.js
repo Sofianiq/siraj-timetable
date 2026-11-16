@@ -19,7 +19,7 @@ const apply = (data, ops) => {
 /** بيانات تشبه ما أضافه المستخدم: كليات بأسماء مختلفة قليلاً وأقسام بمراحل وشعب «صباحي» */
 const base = () => {
   const d = {
-    settings: [{ id: 'app', academicYear: '2026-2027', semester: 1, shifts: { morning: { start: 510, end: 870 }, evening: { start: 870, end: 1200 } } }],
+    settings: [{ id: 'app', academicYear: '2026-2027', semester: 1, days: [0, 1, 2, 3, 4], shifts: { morning: { start: 510, end: 900 }, evening: { start: 870, end: 1200 } } }],
     colleges: [
       { id: 'hmt', name: 'كلية التقنيات الصحية والطبية', own: true },
       { id: 'ph', name: 'كلية الصيدلة', own: true },
@@ -110,14 +110,16 @@ test('university import: matches existing colleges/departments, fills structure,
 test('imported timetables: no double-booked group, co-teachers and college hours used by the conflict engine', () => {
   const data = base();
   const after = apply(data, universityImportPlan(data, ids()).ops);
-  const ctx = buildCtx(after);
+  const ctx = buildCtx({ ...after, settings: after.settings[0] });
   const issues = checkAll(after.sessions, ctx);
   const byType = {};
   for (const list of issues.values()) for (const i of list) byType[`${i.level}:${i.type}`] = (byType[`${i.level}:${i.type}`] || 0) + 1;
   // جداول الطلبة نفسها سليمة: لا شعبة لها محاضرتان في الوقت نفسه
   assert.equal(byType['error:group'] || 0, 0, JSON.stringify(byType));
-  // دوام الكلية: المسائي للهندسية حتى 8:30، وطب الأسنان حتى 4:30 فلا تنبيهات «خارج الدوام»
-  assert.equal(byType['warning:shift'] || 0, 0, JSON.stringify(byType));
+  // الدوام الموحّد 8:30–3:00: التنبيه فقط للمحاضرات الصباحية التي تتجاوز 3:00 في الجداول الأصلية، ولا تنبيه للدراسة المسائية (دوام الهندسية المسائي)
+  const shiftWarned = after.sessions.filter((s) => (issues.get(s.id) || []).some((i) => i.type === 'shift'));
+  assert.ok(shiftWarned.length > 0);
+  assert.ok(shiftWarned.every((s) => s.end > 900 && after.groups.find((g) => g.id === s.groupIds[0]).shift === 'morning'), JSON.stringify(shiftWarned[0]));
   const eng = after.groups.find((g) => g.deptId === 'ai' && g.shift === 'evening');
   assert.deepEqual(shiftWindow(ctx, eng), { start: 750, end: 1230 });
   // الأستاذ المشارك يُحسب في التعارض
@@ -125,4 +127,31 @@ test('imported timetables: no double-booked group, co-teachers and college hours
   assert.equal(teachersOf(co).length, 2);
   const clash = { ...co, id: 'x', groupIds: [], roomId: null, teacherId: co.coTeacherIds[0], coTeacherIds: [] };
   assert.ok(checkAll([co, clash], ctx).get('x').some((i) => i.type === 'teacher'));
+});
+
+test('v6 migration clears college-specific morning hours so every college follows 8:30–3:00, Sat–Wed', async () => {
+  const { migrationPlan, SCHEMA_VERSION, WORK_HOURS, WORK_DAYS } = await import('../js/seed/radiology.js');
+  const data = {
+    settings: [{ id: 'app', schemaVersion: 5, days: [0, 1, 2, 3, 4, 5], shifts: { morning: { start: 510, end: 870 }, evening: { start: 870, end: 1200 } } }],
+    colleges: [
+      { id: 'en', name: 'الكلية التقنية الهندسية', own: true, morningStart: '08:30', morningEnd: '15:30', eveningStart: '12:30', eveningEnd: '20:30' },
+      { id: 'dn', name: 'كلية طب الأسنان', own: true, morningStart: '08:30', morningEnd: '16:30' },
+      { id: 'ph', name: 'كلية الصيدلة', own: true },
+    ],
+    departments: [{ id: 'd1', name: 'طب الأسنان', collegeId: 'dn', general: true }, { id: 'd2', name: 'الصيدلة', collegeId: 'ph', general: true }],
+    stages: [], groups: [], subjects: [], sessions: [], teachers: [], rooms: [],
+  };
+  const { ops } = migrationPlan(data, ids());
+  const st = ops.filter((o) => o.col === 'settings');
+  assert.equal(st.length, 1);
+  assert.equal(st[0].data.schemaVersion, SCHEMA_VERSION);
+  assert.deepEqual(st[0].data.days, WORK_DAYS);
+  assert.deepEqual(st[0].data.shifts.morning, WORK_HOURS);
+  assert.deepEqual(WORK_HOURS, { start: 510, end: 900 });
+  const after = apply(data, ops);
+  const ctx = buildCtx({ ...after, settings: after.settings[0] });
+  assert.equal(after.colleges.find((c) => c.id === 'en').eveningEnd, '20:30');
+  // كل الكليات على الدوام الصباحي الموحّد، والمسائي الخاص بالهندسية باقٍ
+  for (const c of after.colleges) assert.ok(!c.morningStart && !c.morningEnd, c.name);
+  assert.deepEqual(shiftWindow({ ...ctx, settings: after.settings[0] }, { deptId: 'd1', shift: 'morning' }), { start: 510, end: 900 });
 });

@@ -153,7 +153,7 @@ export function tableModel(type, id) {
   const st = settings();
   const days = st.days?.length ? st.days : [1, 2, 3, 4, 5];
   const sessions = sessionsForView(type, id).filter((s) => days.includes(s.day));
-  let from = st.printStart ?? 510, to = st.printEnd ?? 870;
+  let from = st.printStart ?? 510, to = st.printEnd ?? 900;
   // جدول الشعبة: محور الوقت من دوامها (المسائي يبدأ بعد الظهر، ولكل كلية دوامها إن حُدِّد)
   const win = type === 'group' ? groupShiftWindow(byId('groups', id)) : null;
   if (win && (byId('groups', id)?.shift === 'evening' || collegeHours(byId('colleges', collegeOfDept(byId('groups', id)?.deptId)), 'morning'))) {
@@ -161,8 +161,8 @@ export function tableModel(type, id) {
   }
   if (to <= from) to = from + 420;
   for (const s of sessions) {
-    while (s.start < from) from -= 60;
-    while (s.end > to) to += 60;
+    while (s.start < from) from -= 30;
+    while (s.end > to) to += 30;
   }
   // خانة نصف ساعة، أو ربع ساعة إن وُجدت أوقات غير منتظمة
   const step = sessions.every((s) => (s.start - from) % 30 === 0 && (s.end - from) % 30 === 0) ? 30 : 15;

@@ -71,13 +71,14 @@ test('curriculum import updates matching subjects in place, adds the rest, leave
   assert.equal(curriculumImportPlan(after, ids()).ops.length, 0);
 });
 
-test('v5 migration: working hours 8:30–2:30, labs recorded as halls fixed, curriculum imported, settings written once', () => {
+test('migration to v6: unified hours 8:30–3:00 Sat–Wed, labs recorded as halls fixed, curriculum imported, settings written once', () => {
   const { ops, notes } = migrationPlan(base(), ids());
   const st = ops.filter((o) => o.col === 'settings');
   assert.equal(st.length, 1);
   assert.equal(st[0].data.schemaVersion, SCHEMA_VERSION);
-  assert.deepEqual([st[0].data.dayStart, st[0].data.dayEnd, st[0].data.printStart, st[0].data.printEnd], [510, 870, 510, 870]);
-  assert.deepEqual(st[0].data.shifts.morning, { start: 510, end: 870 });
+  assert.deepEqual([st[0].data.dayStart, st[0].data.dayEnd, st[0].data.printStart, st[0].data.printEnd], [510, 900, 510, 900]);
+  assert.deepEqual(st[0].data.shifts.morning, { start: 510, end: 900 });
+  assert.deepEqual(st[0].data.days, [0, 1, 2, 3, 4]);
   assert.deepEqual(st[0].data.shifts.evening, { start: 870, end: 1200 });
   assert.deepEqual(ops.filter((o) => o.col === 'rooms').map((o) => [o.id, o.data.type]), [['r1', 'lab']]);
   assert.ok(ops.some((o) => o.col === 'subjects' && o.op === 'set'));
