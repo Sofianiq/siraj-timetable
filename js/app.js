@@ -11,6 +11,7 @@ import { renderDashboard, renderConflicts, renderUsers, renderSettings, renderLo
 import { seedOps, migrationPlan } from './seed/radiology.js';
 import { deptName, collegeShort, managedColleges, currentCollegeId, setCurrentCollege } from './model.js';
 import { setPrintProvider } from './export.js';
+import { APP_VERSION } from './version.js';
 
 const NAV = [
   { path: 'dashboard', label: 'لوحة التحكم', icon: '🏠' },
@@ -245,6 +246,50 @@ async function autoMigrate() {
 }
 
 /* ------------------------------ البدء ------------------------------ */
+/* ---------------- إصدار أحدث منشور ----------------
+ * المتصفح يحتفظ بملفات النظام في ذاكرته المؤقتة، والصفحة المفتوحة لا تجلب الجديد. نقارن إصدارنا بالملف المنشور
+ * (دون ذاكرة مؤقتة) عند الفتح وكل 15 دقيقة وعند العودة إلى التبويب، ونعرض شريطاً يحدّث الملفات ثم يعيد تحميل الصفحة. */
+let lastUpdateCheck = 0;
+export async function checkForUpdate(force = false) {
+  if (!force && Date.now() - lastUpdateCheck < 60_000) return false;
+  lastUpdateCheck = Date.now();
+  try {
+    const res = await fetch(`js/version.js?check=${Date.now()}`, { cache: 'no-store' });
+    if (!res.ok) return false;
+    const published = (await res.text()).match(/APP_VERSION\s*=\s*'([^']+)'/)?.[1];
+    if (!published || published === APP_VERSION) return false;
+    showUpdateBar(published);
+    return true;
+  } catch { return false; }
+}
+function showUpdateBar(version) {
+  if ($('#updateBar')) return;
+  const bar = el(`<div class="update-bar" id="updateBar" role="status">
+    <span>🔄 <b>يتوفر إصدار أحدث من النظام</b> (فيه تحديثات وجداول جديدة). حدّث الصفحة لتظهر.</span>
+    <button class="btn btn-primary btn-sm" id="updateNow">تحديث الآن</button>
+    <button class="btn btn-sm" id="updateLater" title="إخفاء">✕</button></div>`);
+  document.body.appendChild(bar);
+  $('#updateLater', bar).onclick = () => bar.remove();
+  $('#updateNow', bar).onclick = async () => {
+    $('#updateNow', bar).disabled = true;
+    $('#updateNow', bar).textContent = 'جارٍ التحديث…';
+    await refreshCachedFiles();
+    location.reload();
+  };
+  console.info('إصدار منشور أحدث:', version, '— الحالي:', APP_VERSION);
+}
+/** يجلب ملفات النظام المحمّلة من الخادم من جديد (يتجاوز الذاكرة المؤقتة) حتى يستخدمها إعادة التحميل */
+async function refreshCachedFiles() {
+  const urls = new Set(['index.html', 'js/app.js', 'js/version.js', 'js/seed/university-data.js', 'js/seed/university.js', 'css/style.css']
+    .map((p) => new URL(p, location.href).href));
+  for (const e of performance.getEntriesByType('resource')) {
+    const u = new URL(e.name);
+    if (u.origin === location.origin && /\.(js|css|html)$/.test(u.pathname)) urls.add(u.origin + u.pathname);
+  }
+  urls.add(location.href.split('#')[0]);
+  await Promise.all([...urls].map((u) => fetch(u, { cache: 'reload' }).catch(() => null)));
+}
+
 async function main() {
   window.__appStarted = true;
   shell();
@@ -271,6 +316,9 @@ async function main() {
   onAuth(async () => { await autoSeed(); await autoMigrate(); route(); });
   window.addEventListener('hashchange', route);
   route();
+  setTimeout(() => checkForUpdate(true), 4000);
+  setInterval(() => checkForUpdate(true), 15 * 60_000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkForUpdate(); });
 }
 
 main();

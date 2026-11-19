@@ -485,3 +485,10 @@ td.sc.stk.narrow .sg-meta { display: block; width: 100%; }
 .dropdown-menu button.muted-item { color: var(--muted); font-size: .82rem; }
 .pdf-hint ol { padding-inline-start: 1.2rem; margin: .5rem 0; line-height: 1.9; }
 .pdf-hint b { color: var(--primary-2); }
+
+/* شريط «يتوفر إصدار أحدث» */
+.update-bar { position: fixed; inset-inline: 0; bottom: 0; z-index: 2000; display: flex; gap: .75rem; align-items: center; justify-content: center; flex-wrap: wrap;
+  padding: .7rem 1rem; background: var(--primary, #0f766e); color: #fff; box-shadow: 0 -6px 20px rgba(0,0,0,.18); font-size: .95rem; }
+.update-bar .btn { background: #fff; color: var(--primary, #0f766e); border-color: #fff; }
+.update-bar #updateLater { background: transparent; color: #fff; border-color: rgba(255,255,255,.5); }
+@media print { .update-bar { display: none !important; } }
