@@ -282,7 +282,7 @@ test('v4: Construction stage 1 morning becomes groups A and B with a hall each, 
   assert.equal(hours(B), 23);
   // لكل مجموعة قاعتها، والرسم الهندسي في مختبره
   assert.ok(A.every((s) => [ 'SE202', 'مختبر الرسم الهندسي' ].includes(room(s.roomId))));
-  assert.ok(B.every((s) => [ 'SE203', 'مختبر الرسم الهندسي' ].includes(room(s.roomId))));
+  assert.ok(B.every((s) => [ 'SE209', 'مختبر الرسم الهندسي' ].includes(room(s.roomId))));
   // شبكة وقت واحدة: حصص المجموعتين (عدا حقوق الإنسان) في الأوقات نفسها، وكل يوم المواد نفسها
   const grid = (l) => l.filter((s) => s.teacherId).map((s) => `${s.day}-${s.start}`).sort().join();
   assert.equal(grid(A), grid(B));
@@ -333,12 +333,14 @@ test('v5: Oil & Gas timetable with a hall per stage and no clash; Construction e
   assert.ok(st1.every((s) => ['SE213', 'مختبر البرمجة'].includes(room(s.roomId))));
   assert.ok(st2.every((s) => ['SE214', 'مختبر البرمجة'].includes(room(s.roomId))));
   assert.ok(!oilS.some((s) => s.day === 2));
-  // البناء والإنشاءات: الدوام حتى 3:00، والعملي في قاعة المجموعة لمواد المساحة والجيولوجيا، ونظري كل مجموعة وحده
+  // البناء والإنشاءات: جدول القسم المعتمد 8:30–2:30، والعملي في قاعة المجموعة لمواد المساحة والجيولوجيا، ونظري كل مجموعة وحده
   const consSubj = after.subjects.filter((s) => s.deptId === 'cons' || after.departments.find((d) => d.id === s.deptId && /بناء/.test(d.name)));
   assert.ok(consSubj.length >= 6 && consSubj.every((s) => s.combineTheory === false));
   assert.ok(consSubj.find((s) => s.name === 'المساحة المستوية').practicalInHall);
   const consS = after.sessions.filter((s) => consSubj.some((x) => x.id === s.subjectId));
-  assert.ok(consS.some((s) => s.end === 900) && consS.every((s) => s.start >= 510 && s.end <= 900));
+  assert.ok(consS.some((s) => s.end === 870) && consS.every((s) => s.start >= 510 && s.end <= 870));
+  // قاعتا المجموعتين غير SE203 وSE207 (بطلب القسم)
+  assert.ok(!consS.some((s) => ['SE203', 'SE207'].includes(room(s.roomId))));
   // لا تضارب أستاذ أو قاعة أو شعبة، ولا تنبيه «ليست مختبراً»، في جدولي النفط والبناء
   const ctx = buildCtx({ ...after, settings: after.settings[0] });
   const res = checkAll(after.sessions.filter((s) => s.term === '2026-2027/1'), ctx);
