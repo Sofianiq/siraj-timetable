@@ -71,7 +71,7 @@ test('university import: matches existing colleges/departments, fills structure,
   assert.equal(after.colleges.find((c) => c.id === 'en').eveningEnd, '20:30');
   // الأقسام: المطابقة بالاسم، وإنشاء الناقص (البناء والإنشاءات، إدارة الأعمال، المالية، النفط)
   const deptNames = after.departments.filter((d) => d.collegeId === 'en').map((d) => d.name);
-  assert.equal(deptNames.length, 4);
+  assert.equal(deptNames.length, 5);
   assert.ok(report.departments.find((d) => d.path === 'ENG/AI').status === 'matched');
   assert.ok(report.departments.find((d) => d.path === 'ECO/ACC').status === 'matched');
   assert.equal(after.departments.filter((d) => d.collegeId === 'ec' && !d.general).length, 4);
@@ -343,5 +343,34 @@ test('v5: Oil & Gas timetable with a hall per stage and no clash; Construction e
   const ctx = buildCtx({ ...after, settings: after.settings[0] });
   const res = checkAll(after.sessions.filter((s) => s.term === '2026-2027/1'), ctx);
   for (const s of [...oilS, ...consS]) for (const i of res.get(s.id) || []) assert.ok(!['teacher', 'room', 'group', 'roomOwner', 'roomType'].includes(i.type), `${i.type}: ${i.message}`);
+  assert.equal(universityImportPlan(after, ids()).ops.length, 0);
+});
+
+test('v6: Medical Devices timetable with its own two halls (not SE203/SE207) and no clash with other departments', () => {
+  const data = base();
+  const { ops } = universityImportPlan(data, ids());
+  const after = apply(data, ops);
+  const med = after.departments.find((d) => d.collegeId === 'en' && /الاجهزه الطبيه|الأجهزة الطبية/.test(d.name));
+  assert.equal(med.head, 'د. زينب أياد وجيه');
+  const room = (id) => after.rooms.find((r) => r.id === id)?.name;
+  const lvl = (s) => after.stages.find((x) => x.id === after.groups.find((g) => g.id === s.groupIds[0]).stageId).level;
+  const medS = after.sessions.filter((s) => s.deptId === med.id);
+  const st1 = medS.filter((s) => lvl(s) === 1), st2 = medS.filter((s) => lvl(s) === 2);
+  assert.equal(st1.length, 10);
+  assert.equal(st2.length, 12);
+  assert.ok(st1.every((s) => ['SE111', 'مختبر البرمجة'].includes(room(s.roomId))));
+  assert.ok(st2.every((s) => room(s.roomId) === 'SE112'));
+  assert.ok(!medS.some((s) => ['SE203', 'SE207'].includes(room(s.roomId)) || s.day === 2));
+  // القاعتان للقسم وحده: لا يستخدمهما قسم آخر
+  const halls = new Set(medS.map((s) => s.roomId));
+  assert.ok(!after.sessions.some((s) => s.deptId !== med.id && halls.has(s.roomId) && room(s.roomId).startsWith('SE')));
+  // د. أيمن جمعة (العلوم) مشارك في التشريح ومسجّل مرة واحدة مع الكلية التقنية الهندسية
+  const ayman = after.teachers.filter((t) => t.name.includes('أيمن جمعة'));
+  assert.equal(ayman.length, 1);
+  assert.ok(ayman[0].sharedColleges.includes('en'));
+  // لا تضارب أستاذ أو قاعة أو شعبة ولا تنبيه نوع قاعة
+  const ctx = buildCtx({ ...after, settings: after.settings[0] });
+  const res = checkAll(after.sessions.filter((s) => s.term === '2026-2027/1'), ctx);
+  for (const s of medS) for (const i of res.get(s.id) || []) assert.ok(!['teacher', 'room', 'group', 'roomOwner', 'roomType'].includes(i.type), `${i.type}: ${i.message}`);
   assert.equal(universityImportPlan(after, ids()).ops.length, 0);
 });
