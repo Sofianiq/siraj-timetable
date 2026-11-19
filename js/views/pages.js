@@ -44,7 +44,7 @@ export function renderDashboard(container) {
   const page = el(`<div class="page">
     <div class="page-head"><h2>لوحة التحكم</h2>${cur ? `<span class="term-badge">🏛 ${esc(collegeName(cur))}</span>` : ''}<span class="term-badge">${esc(termLabel())}</span></div>
     ${universityImportPending() ? `<div class="banner info uimp-banner"><span>🏛 ${universityImportIsUpdate()
-      ? '<b>تحديث بيانات الجامعة جاهز:</b> جدول قسم القانون وجدول قسم الأدلة الجنائية، وتوزيع القاعات الدراسية على الكليات — دون المساس بالجداول السابقة أو بتعديلاتك.'
+      ? '<b>تحديث بيانات الجامعة جاهز:</b> جدولا المرحلة الأولى لقسم البناء والإنشاءات (المجموعة A والمجموعة B) بقاعة لكل مجموعة ودون تضارب بين الأساتذة، ومعهما جدولا القانون والأدلة الجنائية وتوزيع القاعات إن لم تكن حدّثت بعد.'
       : '<b>جداول كليات الجامعة جاهزة للاستيراد:</b> الكلية التقنية الهندسية، والإدارة والاقتصاد، والصيدلة، وطب الأسنان، والقانون والعلوم السياسية، والعلوم — بموادها وكادرها وقاعاتها المرمّزة ومحاضرات كل قسم ومرحلة.'}</span>
       <button class="btn btn-primary btn-sm" id="uimp">معاينة و${universityImportIsUpdate() ? 'تحديث' : 'استيراد'}</button></div>` : ''}
     ${isAdmin() && (daysSinceBackup === null || daysSinceBackup > 7) ? `<div class="banner warn">💾 ${daysSinceBackup === null ? 'لم تُؤخذ نسخة احتياطية بعد.' : `آخر نسخة احتياطية قبل ${daysSinceBackup} يوم.`} <a href="#/settings">خذ نسخة الآن</a></div>` : ''}

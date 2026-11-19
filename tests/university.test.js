@@ -247,3 +247,62 @@ test('v3 update: Law and Forensic Evidence timetables are added and halls follow
   // إعادة الاستيراد لا تكتب شيئاً
   assert.equal(universityImportPlan(after, ids()).ops.length, 0);
 });
+
+test('v4: Construction stage 1 morning becomes groups A and B with a hall each, a shared time grid and no teacher clash; the old timetable is retired unless edited', () => {
+  const withOld = (edited) => {
+    const d = base();
+    d.departments.push({ id: 'cons', name: 'قسم هندسة تقنيات البناء والانشاءات', collegeId: 'en' });
+    d.stages.push({ id: 'conss1', deptId: 'cons', level: 1, name: 'المرحلة الأولى' });
+    d.groups.push({ id: 'consg', deptId: 'cons', stageId: 'conss1', shift: 'morning', name: 'صباحي', students: 40, subgroups: ['A', 'B', 'C', 'D'] });
+    const old = (id, day, start, extra = {}) => {
+      const s = { id, term: '2026-2027/1', deptId: 'cons', subjectId: 'x', kind: 'theory', groupIds: ['consg'], subgroups: [], teacherId: null, coTeacherIds: [], roomId: null, day, start, end: start + 120, note: '', source: 'university' };
+      return { ...s, importSig: importSignature(s), ...extra };
+    };
+    d.sessions.push(old('old1', 0, 510), old('old2', 1, 630));
+    if (edited) d.sessions.push(old('old3', 2, 510, { start: 540 }));  // عدّله المستخدم بعد الاستيراد
+    return d;
+  };
+  // 1) الجدول القديم بلا تعديل: يُحذف، والشعبة «صباحي» تصبح «المجموعة A» بعدد طلبتها، وتُنشأ «المجموعة B»
+  const data = withOld(false);
+  const { ops, report } = universityImportPlan(data, ids());
+  const after = apply(data, ops);
+  assert.ok(!after.sessions.some((s) => /^old/.test(s.id)));
+  assert.equal(report.removed.length, 2);
+  const gA = after.groups.find((g) => g.id === 'consg');
+  assert.deepEqual([gA.name, gA.students, gA.subgroups], ['المجموعة A', 40, []]);
+  const gB = after.groups.find((g) => g.stageId === 'conss1' && g.name === 'المجموعة B');
+  assert.ok(gB);
+  const room = (id) => after.rooms.find((r) => r.id === id)?.name;
+  const of = (g) => after.sessions.filter((s) => s.groupIds.includes(g.id));
+  const A = of(gA), B = of(gB);
+  assert.equal(A.length, 12);
+  assert.equal(B.length, 12);
+  const hours = (l) => l.reduce((n, s) => n + (s.end - s.start) / 60, 0);
+  assert.equal(hours(A), 23);
+  assert.equal(hours(B), 23);
+  // لكل مجموعة قاعتها، والرسم الهندسي في مختبره
+  assert.ok(A.every((s) => [ 'SE202', 'مختبر الرسم الهندسي' ].includes(room(s.roomId))));
+  assert.ok(B.every((s) => [ 'SE203', 'مختبر الرسم الهندسي' ].includes(room(s.roomId))));
+  // شبكة وقت واحدة: حصص المجموعتين (عدا حقوق الإنسان) في الأوقات نفسها، وكل يوم المواد نفسها
+  const grid = (l) => l.filter((s) => s.teacherId).map((s) => `${s.day}-${s.start}`).sort().join();
+  assert.equal(grid(A), grid(B));
+  for (let d = 0; d < 5; d++) {
+    const subj = (l) => l.filter((s) => s.day === d).map((s) => `${s.subjectId}${s.kind}`).sort().join();
+    assert.equal(subj(A), subj(B));
+  }
+  // داخل وقت الدوام 8:30–3:00 ولا تضارب أستاذ أو قاعة أو شعبة مع أي محاضرة أخرى
+  assert.ok([...A, ...B].every((s) => s.start >= 510 && s.end <= 900));
+  const ctx = buildCtx({ ...after, settings: after.settings[0] });
+  const term = after.sessions.filter((s) => s.term === '2026-2027/1');
+  const res = checkAll(term, ctx);
+  for (const s of [...A, ...B]) for (const i of res.get(s.id) || []) assert.ok(!['teacher', 'room', 'group', 'roomOwner'].includes(i.type), i.message);
+  assert.equal(universityImportPlan(after, ids()).ops.length, 0);
+  // 2) محاضرة قديمة عدّلها المستخدم: تبقى، ولا تُحوَّل شعبتها، فتُنشأ المجموعتان A وB جديدتين
+  const d2 = withOld(true);
+  const p2 = universityImportPlan(d2, ids());
+  const a2 = apply(d2, p2.ops);
+  assert.equal(p2.report.keptEdited.length, 1);
+  assert.ok(a2.sessions.some((s) => s.id === 'old3'));
+  assert.equal(a2.groups.find((g) => g.id === 'consg').name, 'صباحي');
+  assert.deepEqual(a2.groups.filter((g) => g.stageId === 'conss1' && g.shift === 'morning').map((g) => g.name).sort(), ['المجموعة A', 'المجموعة B', 'صباحي']);
+});

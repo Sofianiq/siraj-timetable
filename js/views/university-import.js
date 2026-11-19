@@ -18,12 +18,13 @@ const SOURCE_NOTES = [
   'قسم القانون (المرحلة الأولى): حصص 45 دقيقة كما في الجدول الأصلي، في القاعة SE217 لأن الجدول ترك «مكان القاعة التدريسية» فارغاً.',
   'قسم الأدلة الجنائية (المرحلة الثانية): المحاضرات النظرية في SE107 (قاعة الأدلة الجنائية)، ومنها محاضرة الثلاثاء المكتوب لها «قاعة صناعة الأسنان» لأنها ليست من قاعات الكلية؛ والعملي في مختبرات الكلية الثلاثة.',
   'تعارض أساتذة في الجداول الأصلية نفسها: م.د. باسم ناصر يوم الاثنين («الإحصاء» في الأدلة الجنائية 12:30–2:30 مع الإحصاء في الإدارة والاقتصاد وBiostatistics في الصيدلة 11:30–1:30)، وم.د عمر فلاح ابراهيم يوم الثلاثاء (الأدلة الجنائية 8:30–12:30 مع Analytical chemistry في الصيدلة 8:30–11:30). يظهر في صفحة «التعارضات» ليُعدَّل أحد الجدولين.',
+  'البناء والإنشاءات – المرحلة الأولى الصباحي: جدول جديد لمجموعتين A وB يحل محل الجدول القديم. شبكة وقت واحدة والأساتذة مشتركون: في كل حصة تأخذ المجموعتان مادتين بأستاذين مختلفين ثم تتبادلانهما، فلا يتضارب أستاذ. المجموعة A في القاعة SE202 والمجموعة B في SE203، والرسم الهندسي في مختبره. عملي المساحة والجيولوجيا في قاعة المجموعة لعدم وجود مختبر لهما في الترميز (يظهر له تنبيه «ليست مختبراً»). الجدول المسائي للقسم كما هو.',
   'القاعات الجديدة أُضيفت بلا سعة لأن الملفات لا تذكرها؛ أدخل سعة كل قاعة من صفحة «القاعات والمختبرات» ليُفعَّل تنبيه تجاوز السعة.',
 ];
 
 /** هل الاستيراد متاح ولم يُنفَّذ بعد بالإصدار الحالي من البيانات؟ */
 export const universityImportPending = () => isAdmin() && (settings().universityImport?.version || 0) < DATA_VERSION;
-/** استُوردت الجداول سابقاً بإصدار أقدم من البيانات (التحديث الحالي: جدولا القانون والأدلة الجنائية وتوزيع القاعات) */
+/** استُوردت الجداول سابقاً بإصدار أقدم من البيانات (التحديث الحالي: مجموعتا البناء والإنشاءات A وB) */
 export const universityImportIsUpdate = () => (settings().universityImport?.version || 0) > 0;
 
 export async function openUniversityImport() {
@@ -49,6 +50,8 @@ export async function openUniversityImport() {
     </tbody></table>
     ${r.warnings.map((w) => `<div class="banner warn">⚠️ ${esc(w)}</div>`).join('')}
     ${termNow !== termData ? `<label class="chk uimp-opt"><input type="checkbox" id="setTerm" checked> اجعل الفصل الحالي في الإعدادات <b>${esc(SEMESTERS[TERM.semester])} ${ltr(TERM.year)}</b> (الحالي: ${esc(SEMESTERS[st.semester] || '')} ${ltr(st.academicYear || '')}) حتى تظهر الجداول المستوردة</label>` : ''}
+    ${r.removed.length ? `<div class="banner info">🔁 جدول جديد يحل محل القديم: تُحذف ${r.removed.length} محاضرة من الجدول القديم (${[...new Set(r.removed)].map(esc).join('، ')})${r.renamedGroups.length ? `، وتصبح الشعبة ${r.renamedGroups.map((x) => `«${esc(x.from)}» «${esc(x.to)}»`).join(' و')}` : ''}.</div>` : ''}
+    ${r.keptEdited.length ? `<div class="banner warn">✋ ${r.keptEdited.length} محاضرة من الجدول القديم عدّلتها يدوياً فلن تُحذف (${[...new Set(r.keptEdited)].map(esc).join('، ')}) — احذفها بنفسك إن لم تعد لازمة.</div>` : ''}
     ${r.existingOther ? `<label class="chk uimp-opt"><input type="checkbox" id="replace" ${universityImportIsUpdate() ? '' : 'checked'}> توجد <b>${r.existingOther}</b> محاضرة مسجّلة مسبقاً لشعب هذه الجداول في الفصل نفسه — تُحذف وتُعتمد الجداول الرسمية المستوردة، حتى لا تتكرر المحاضرات. ${universityImportIsUpdate() ? 'غير محدَّد في التحديث حتى تبقى المحاضرات التي أضفتها بنفسك.' : 'ألغِ التحديد للإبقاء عليها.'}</label>` : ''}
     <label class="chk uimp-opt"><input type="checkbox" id="backupFirst" checked> تنزيل نسخة احتياطية من البيانات الحالية قبل الاستيراد (للرجوع إليها من «الإعدادات ← استعادة من نسخة»)</label>
     ${r.similarTeachers.length ? `<details class="uimp-det"><summary>👨‍🏫 ${r.similarTeachers.length} اسم أستاذ يطابق اسماً في كادر كلية أخرى (لم يُدمج تلقائياً)</summary>
@@ -75,7 +78,7 @@ export async function openUniversityImport() {
     toast('جارٍ الاستيراد…', 'info', 3000);
     await batchWrite(ops);
     const s2 = importSummary(plan.report);
-    toast(`تم الاستيراد بنجاح. ${s2.created ? `أُضيف: ${s2.created}.` : ''} ${s2.updated ? `حُدِّث: ${s2.updated}.` : ''}${plan.report.replaced ? ` حُذفت ${plan.report.replaced} محاضرة سابقة.` : ''} راجع صفحة «التعارضات».`, 'success', 12000);
+    toast(`تم الاستيراد بنجاح. ${s2.created ? `أُضيف: ${s2.created}.` : ''} ${s2.updated ? `حُدِّث: ${s2.updated}.` : ''}${plan.report.replaced + plan.report.removed.length ? ` حُذفت ${plan.report.replaced + plan.report.removed.length} محاضرة سابقة.` : ''} راجع صفحة «التعارضات».`, 'success', 12000);
     return true;
   } catch (e) {
     console.error(e);

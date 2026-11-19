@@ -77,7 +77,8 @@ function printInfo(type, id, days) {
       stage = store.data.stages.find((x) => x.deptId === deptId && String(x.level) === level) || (level ? { level: Number(level) } : null);
     }
     info.org.push(...deptOrg(d));
-    const sub = g && g.name && g.name !== SHIFTS[g.shift] ? ` — شعبة ${g.name}` : '';
+    // «المجموعة A» تُكتب كما هي، وغيرها يُسبق بكلمة «شعبة»
+    const sub = g && g.name && g.name !== SHIFTS[g.shift] ? ` — ${/^(ال)?(شعبه|مجموعه)/.test(normName(g.name)) ? g.name : `شعبة ${g.name}`}` : '';
     info.meta.push(stage ? stageName(stage) + sub : 'محاضرات غير مرتبطة بشعبة');
     info.shift = g?.shift || 'morning';
     info.theme = themeKeyForDept(d?.id);
