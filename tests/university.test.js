@@ -92,7 +92,9 @@ test('university import: matches existing colleges/departments, fills structure,
   // أستاذ مشترك بين كليتين يُسجَّل مرة واحدة ويُضاف إلى كلية أخرى
   const hind = after.teachers.filter((t) => normPerson(t.name) === normPerson('هند حامد'));
   assert.equal(hind.length, 1);
-  assert.deepEqual(hind[0].sharedColleges, ['dn']);
+  // طب الأسنان، والعلوم (فيزياء الأدلة الجنائية)
+  assert.ok(hind[0].sharedColleges.includes('dn'));
+  assert.equal(hind[0].sharedColleges.length, 2);
   // مطابقة صريحة مع كادر كلية أخرى: أستاذ العربية في الصيدلة = م.د عبد الرحمن احمد عيدان
   assert.ok(after.teachers.find((t) => t.id === 'h2').sharedColleges.includes('ph'));
   // المادة الموجودة تُحدَّث ولا تتكرر
@@ -217,7 +219,8 @@ test('v3 update: Law and Forensic Evidence timetables are added and halls follow
   assert.equal(forDept.name, 'قسم الأدلة الجنائية');
   const room = (id) => after.rooms.find((r) => r.id === id);
   const lawS = after.sessions.filter((x) => x.deptId === lawDept.id);
-  const sciS = after.sessions.filter((x) => x.deptId === forDept.id);
+  const stageOf = (x) => after.stages.find((st) => st.id === after.groups.find((g) => g.id === x.groupIds[0])?.stageId)?.level;
+  const sciS = after.sessions.filter((x) => x.deptId === forDept.id && stageOf(x) === 2);
   assert.equal(lawS.length, 15);
   assert.equal(sciS.length, 10);
   // حصص القانون 45 دقيقة في SE217؛ نظري الأدلة الجنائية في SE107 والعملي في مختبرات الكلية
@@ -242,7 +245,9 @@ test('v3 update: Law and Forensic Evidence timetables are added and halls follow
   assert.ok(ecoS.length > 0);
   for (const x of ecoS) assert.equal(room(x.roomId).collegeId, 'ec', `${room(x.roomId).name} ${x.day} ${x.start}`);
   const ctx = buildCtx({ ...after, settings: after.settings[0] });
-  const imported = after.sessions.filter((x) => x.source === 'university' && [lawDept.id, forDept.id, 'acc'].includes(x.deptId) && x.id !== edited.id);
+  // المرحلة الثانية للأدلة الجنائية (الأولى تستخدم LD 309 في كلية القانون كما في جدولها، ويغطيها اختبار v8)
+  const imported = after.sessions.filter((x) => x.source === 'university' && x.id !== edited.id
+    && ([lawDept.id, 'acc'].includes(x.deptId) || (x.deptId === forDept.id && stageOf(x) === 2)));
   for (const [, list] of checkAll(imported, ctx)) for (const i of list) assert.ok(!['room', 'group', 'roomOwner'].includes(i.type), i.message);
   // إعادة الاستيراد لا تكتب شيئاً
   assert.equal(universityImportPlan(after, ids()).ops.length, 0);
@@ -374,5 +379,37 @@ test('v6: Medical Devices timetable with its own two halls (not SE203/SE207) and
   const ctx = buildCtx({ ...after, settings: after.settings[0] });
   const res = checkAll(after.sessions.filter((s) => s.term === '2026-2027/1'), ctx);
   for (const s of medS) for (const i of res.get(s.id) || []) assert.ok(!['teacher', 'room', 'group', 'roomOwner', 'roomType'].includes(i.type), `${i.type}: ${i.message}`);
+  assert.equal(universityImportPlan(after, ids()).ops.length, 0);
+});
+
+test('v8: Forensic Evidence stage 1 added as in its timetable, with its halls; shared teachers linked, not duplicated', () => {
+  const data = base();
+  const after = apply(data, universityImportPlan(data, ids()).ops);
+  const sci = after.colleges.find((c) => c.name === 'كلية العلوم التطبيقية');
+  const law = after.colleges.find((c) => c.name === 'كلية القانون والعلوم السياسية');
+  const forDept = after.departments.find((d) => d.collegeId === sci.id);
+  const room = (id) => after.rooms.find((r) => r.id === id);
+  const lvl = (s) => after.stages.find((x) => x.id === after.groups.find((g) => g.id === s.groupIds[0]).stageId).level;
+  const st1 = after.sessions.filter((s) => s.deptId === forDept.id && lvl(s) === 1);
+  assert.equal(st1.length, 9);
+  assert.ok(!st1.some((s) => s.day === 0), 'السبت عطلة');
+  assert.deepEqual([...new Set(st1.map((s) => room(s.roomId).name))].sort(),
+    ['بناية المختبرات – الطابق 1', 'بناية المختبرات – الطابق 3', 'قاعة Fs (214)', 'كلية القانون – LD 309'].sort());
+  assert.equal(after.rooms.find((r) => r.code === 'LD309').collegeId, law.id);
+  assert.equal(after.rooms.find((r) => r.code === 'FS214').collegeId, sci.id);
+  // العملي في بناية المختبرات
+  assert.ok(st1.filter((s) => s.kind === 'practical').every((s) => room(s.roomId).type === 'lab'));
+  // أساتذة مشتركون مع الصيدلة يُربطون بسجلهم
+  assert.equal(after.teachers.filter((t) => t.name.includes('هند حامد')).length, 1);
+  assert.ok(after.teachers.find((t) => t.name.includes('هند حامد')).sharedColleges.includes(sci.id));
+  // لا تضارب قاعة أو شعبة؛ وتعارض الأستاذ الوحيد هو الموجود في الأصل (الكيمياء العامة يوم الأحد)
+  const ctx = buildCtx({ ...after, settings: after.settings[0] });
+  const res = checkAll(after.sessions.filter((s) => s.term === '2026-2027/1'), ctx);
+  const teacherClash = [];
+  for (const s of st1) for (const i of res.get(s.id) || []) {
+    assert.ok(!['room', 'group', 'roomType'].includes(i.type), `${i.type}: ${i.message}`);
+    if (i.type === 'teacher') teacherClash.push(`${s.day}-${s.start}`);
+  }
+  assert.deepEqual([...new Set(teacherClash)], ['1-630']);
   assert.equal(universityImportPlan(after, ids()).ops.length, 0);
 });
