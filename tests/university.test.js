@@ -71,7 +71,7 @@ test('university import: matches existing colleges/departments, fills structure,
   assert.equal(after.colleges.find((c) => c.id === 'en').eveningEnd, '20:30');
   // الأقسام: المطابقة بالاسم، وإنشاء الناقص (البناء والإنشاءات، إدارة الأعمال، المالية، النفط)
   const deptNames = after.departments.filter((d) => d.collegeId === 'en').map((d) => d.name);
-  assert.equal(deptNames.length, 3);
+  assert.equal(deptNames.length, 4);
   assert.ok(report.departments.find((d) => d.path === 'ENG/AI').status === 'matched');
   assert.ok(report.departments.find((d) => d.path === 'ECO/ACC').status === 'matched');
   assert.equal(after.departments.filter((d) => d.collegeId === 'ec' && !d.general).length, 4);
@@ -305,4 +305,43 @@ test('v4: Construction stage 1 morning becomes groups A and B with a hall each, 
   assert.ok(a2.sessions.some((s) => s.id === 'old3'));
   assert.equal(a2.groups.find((g) => g.id === 'consg').name, 'صباحي');
   assert.deepEqual(a2.groups.filter((g) => g.stageId === 'conss1' && g.shift === 'morning').map((g) => g.name).sort(), ['المجموعة A', 'المجموعة B', 'صباحي']);
+});
+
+test('v5: Oil & Gas timetable with a hall per stage and no clash; Construction evening removed; hall practicals and separate theory', () => {
+  const data = base();
+  data.departments.push({ id: 'cons', name: 'قسم هندسة تقنيات البناء والانشاءات', collegeId: 'en' });
+  data.stages.push({ id: 'conss1', deptId: 'cons', level: 1, name: 'المرحلة الأولى' });
+  data.groups.push({ id: 'conse', deptId: 'cons', stageId: 'conss1', shift: 'evening', name: 'مسائي', students: 0 });
+  const ev = { id: 'ev1', term: '2026-2027/1', deptId: 'cons', subjectId: 'x', kind: 'theory', groupIds: ['conse'], subgroups: [], teacherId: null, coTeacherIds: [], roomId: null, day: 0, start: 870, end: 990, note: '', source: 'university' };
+  data.sessions.push({ ...ev, importSig: importSignature(ev) });
+  const { ops, report } = universityImportPlan(data, ids());
+  const after = apply(data, ops);
+  // الدراسة المسائية للمرحلة الأولى أُلغيت: تُحذف محاضرتها وشعبتها
+  assert.ok(!after.sessions.some((s) => s.id === 'ev1'));
+  assert.ok(!after.groups.some((g) => g.id === 'conse'));
+  assert.equal(report.removedGroups.length, 1);
+  // قسم النفط والغاز في الكلية التقنية الهندسية برئيس قسمه
+  const oil = after.departments.find((d) => d.collegeId === 'en' && /نفط/.test(d.name));
+  assert.equal(oil.head, 'م.د. عامر ناجي أحمد النعيمي');
+  const room = (id) => after.rooms.find((r) => r.id === id)?.name;
+  const lvl = (s) => after.stages.find((x) => x.id === after.groups.find((g) => g.id === s.groupIds[0]).stageId).level;
+  const oilS = after.sessions.filter((s) => s.deptId === oil.id);
+  const st1 = oilS.filter((s) => lvl(s) === 1), st2 = oilS.filter((s) => lvl(s) === 2);
+  assert.equal(st1.length, 11);
+  assert.equal(st2.length, 12);
+  // لكل مرحلة قاعتها، والحاسوب في مختبر البرمجة، ولا دوام يوم الاثنين
+  assert.ok(st1.every((s) => ['SE213', 'مختبر البرمجة'].includes(room(s.roomId))));
+  assert.ok(st2.every((s) => ['SE214', 'مختبر البرمجة'].includes(room(s.roomId))));
+  assert.ok(!oilS.some((s) => s.day === 2));
+  // البناء والإنشاءات: الدوام حتى 3:00، والعملي في قاعة المجموعة لمواد المساحة والجيولوجيا، ونظري كل مجموعة وحده
+  const consSubj = after.subjects.filter((s) => s.deptId === 'cons' || after.departments.find((d) => d.id === s.deptId && /بناء/.test(d.name)));
+  assert.ok(consSubj.length >= 6 && consSubj.every((s) => s.combineTheory === false));
+  assert.ok(consSubj.find((s) => s.name === 'المساحة المستوية').practicalInHall);
+  const consS = after.sessions.filter((s) => consSubj.some((x) => x.id === s.subjectId));
+  assert.ok(consS.some((s) => s.end === 900) && consS.every((s) => s.start >= 510 && s.end <= 900));
+  // لا تضارب أستاذ أو قاعة أو شعبة، ولا تنبيه «ليست مختبراً»، في جدولي النفط والبناء
+  const ctx = buildCtx({ ...after, settings: after.settings[0] });
+  const res = checkAll(after.sessions.filter((s) => s.term === '2026-2027/1'), ctx);
+  for (const s of [...oilS, ...consS]) for (const i of res.get(s.id) || []) assert.ok(!['teacher', 'room', 'group', 'roomOwner', 'roomType'].includes(i.type), `${i.type}: ${i.message}`);
+  assert.equal(universityImportPlan(after, ids()).ops.length, 0);
 });

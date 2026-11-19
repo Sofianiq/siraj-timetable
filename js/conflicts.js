@@ -124,7 +124,7 @@ export function checkSession(s, all, ctx) {
       issues.push({ level: 'warning', type: 'roomOwner', message: `${room.name} من قاعات ${owner?.name || 'كلية أخرى'}` });
     }
     const subj = ctx.subjects.get(s.subjectId);
-    if (s.kind === 'practical' && room.type !== 'lab') {
+    if (s.kind === 'practical' && room.type !== 'lab' && !subj?.practicalInHall) {
       issues.push({ level: 'warning', type: 'roomType', message: `المحاضرة عملية لكن ${room.name} ليست مختبراً` });
     } else if (s.kind === 'practical' && subj?.labType && room.labKind && subj.labType !== room.labKind) {
       issues.push({ level: 'warning', type: 'roomType', message: `المادة تحتاج مختبر «${subj.labType}» و${room.name} مختبر «${room.labKind}»` });

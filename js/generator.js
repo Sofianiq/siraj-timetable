@@ -141,7 +141,7 @@ export function buildDemands({ subjects, stages, groups, settings, keptSessions,
         needed: sub ? Math.ceil((Number(groupList[0].students) || 0) / groupList[0].subgroups.length)
           : groupList.reduce((n, g) => n + (Number(g.students) || 0), 0),
         duration: Math.round(dur * 60), teacherId: teacherId || null,
-        labType: subj.labType || '', subjectName: subj.name + (sub ? ` — مجموعة ${sub}` : ''),
+        labType: subj.labType || '', inHall: !!subj.practicalInHall, subjectName: subj.name + (sub ? ` — مجموعة ${sub}` : ''),
       });
 
 
@@ -177,9 +177,11 @@ function roomOptions(d, rooms, deptCollege) {
   const opts = [];
   for (const r of rooms) {
     if (r.active === false) continue;
-    if (!usable(r) && (d.kind === 'practical' ? ownLab : ownHall)) continue;
+    // مادة عمليّها في قاعة دراسية (مثل المساحة): تُعامل كالنظري في اختيار القاعة
+    const needsLab = d.kind === 'practical' && !d.inHall;
+    if (!usable(r) && (needsLab ? ownLab : ownHall)) continue;
     let pen = 0;
-    if (d.kind === 'practical') {
+    if (needsLab) {
       if (r.type !== 'lab') { if (anyLab) continue; pen += 30; }
       if (d.labType && r.labKind && r.labKind !== d.labType) pen += 25;
       if (d.labType && !r.labKind) pen += 5;

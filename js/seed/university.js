@@ -12,7 +12,7 @@
 import { normName, normPerson, stripTitle } from '../text.js';
 import { STAGE_NAMES, SHIFTS } from '../timeutil.js';
 import { subjectSimilarity, samePerson } from './curriculum.js';
-import { DATA_VERSION, TERM, COLLEGES, ROOMS, TEACHERS, SUBJECTS, GROUPS, SESSIONS, SKIPPED_ROOMS } from './university-data.js';
+import { DATA_VERSION, TERM, COLLEGES, ROOMS, TEACHERS, SUBJECTS, GROUPS, SESSIONS, SKIPPED_ROOMS, REMOVED_GROUPS } from './university-data.js';
 
 export { DATA_VERSION, TERM, SKIPPED_ROOMS };
 
@@ -55,7 +55,7 @@ function titleOf(name) {
 export function universityImportPlan(data, uid, { replace = false } = {}) {
   const ops = [];
   const count = () => ({ colleges: 0, departments: 0, stages: 0, groups: 0, rooms: 0, teachers: 0, subjects: 0, sessions: 0 });
-  const report = { created: count(), updated: count(), colleges: [], departments: [], warnings: [], similarTeachers: [], retiredRooms: [], replaced: 0, existingOther: 0, removed: [], keptEdited: [], renamedGroups: [] };
+  const report = { created: count(), updated: count(), colleges: [], departments: [], warnings: [], similarTeachers: [], retiredRooms: [], replaced: 0, existingOther: 0, removed: [], keptEdited: [], renamedGroups: [], removedGroups: [] };
   const colleges = [...(data.colleges || [])];
   const departments = [...(data.departments || [])];
   const stages = [...(data.stages || [])];
@@ -255,7 +255,7 @@ export function universityImportPlan(data, uid, { replace = false } = {}) {
   const subjectId = {};
   const existingSubjects = data.subjects || [];
   const usedSubj = new Set();
-  for (const [path, level, name, th, pr, online, tt, pt] of SUBJECTS) {
+  for (const [path, level, name, th, pr, online, tt, pt, opts = {}] of SUBJECTS) {
     const did = deptId[path];
     if (!did) continue;
     const pool = existingSubjects.filter((s) => s.deptId === did && Number(s.stageLevel) === level && Number(s.semester || 1) === TERM.semester && !usedSubj.has(s.id));
@@ -272,12 +272,16 @@ export function universityImportPlan(data, uid, { replace = false } = {}) {
       for (const [k, v] of Object.entries(official)) if ((s[k] ?? 0) !== v) patch[k] = v;
       for (const [k, v] of Object.entries(tids)) if (v && !s[k]) patch[k] = v;
       if (s.needsReview) patch.needsReview = false;
+      // hall: العملي في قاعة دراسية؛ separate: نظري كل شعبة وحده (المجموعتان A وB)
+      if (opts.hall && !s.practicalInHall) patch.practicalInHall = true;
+      if (opts.separate && s.combineTheory !== false) patch.combineTheory = false;
       if (Object.keys(patch).length) { ops.push({ op: 'update', col: 'subjects', id: s.id, data: patch }); report.updated.subjects++; }
       subjectId[`${path}|${level}|${name}`] = s.id;
     } else {
       const id = uid();
       ops.push({ op: 'set', col: 'subjects', id, data: {
-        deptId: did, stageLevel: level, semester: TERM.semester, name, ...official, ...tids, labType: '', combineTheory: true, fromTimetable: true,
+        deptId: did, stageLevel: level, semester: TERM.semester, name, ...official, ...tids, labType: '', combineTheory: !opts.separate, fromTimetable: true,
+        ...(opts.hall ? { practicalInHall: true } : {}),
       } });
       subjectId[`${path}|${level}|${name}`] = id;
       report.created.subjects++;
@@ -323,6 +327,16 @@ export function universityImportPlan(data, uid, { replace = false } = {}) {
   for (const s of stale) {
     if (removable.has(s.id)) { ops.push({ op: 'delete', col: 'sessions', id: s.id }); report.removed.push(label(s)); }
     else report.keptEdited.push(label(s));
+  }
+  // شعب أُلغيت (مثل الدراسة المسائية للمرحلة الأولى في البناء والإنشاءات): تُحذف إن لم يبقَ فيها إلا محاضرات الجدول القديم
+  for (const [path, level, shift] of REMOVED_GROUPS) {
+    const st = stages.find((x) => x.deptId === deptId[path] && Number(x.level) === level);
+    for (const g of groups.filter((x) => st && x.stageId === st.id && (x.shift || 'morning') === shift && !claimed.has(x.id))) {
+      const left = sessions.filter((s) => (s.groupIds || []).includes(g.id) && !removable.has(s.id));
+      if (left.length) { report.warnings.push(`لم تُحذف شعبة «${g.name}» (${label({ deptId: g.deptId, groupIds: [g.id] })}) لأن فيها ${left.length} محاضرة أخرى.`); continue; }
+      ops.push({ op: 'delete', col: 'groups', id: g.id });
+      report.removedGroups.push(label({ deptId: g.deptId, groupIds: [g.id] }));
+    }
   }
   // محاضرات أخرى مسجّلة مسبقاً لشعب الجداول المستوردة في الفصل نفسه
   const others = sessions.filter((s) => (s.term || '') === term && !keep.has(s.id) && !stale.includes(s) && (s.groupIds || []).some((g) => touchedGroups.has(g)));

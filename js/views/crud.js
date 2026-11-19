@@ -218,6 +218,7 @@ const ENTITIES = {
       { key: 'practicalHours', label: 'الساعات العملية أسبوعياً', type: 'number', min: 0, step: 0.5, default: 0 },
       { key: 'onlineHours', label: 'ساعات نظرية إلكترونية (أونلاين)', type: 'number', min: 0, step: 0.5, default: 0, help: 'جزء النظري الذي يُدرَّس إلكترونياً، فلا يحتاج قاعة ولا يدخل في الجدول' },
       { key: 'labType', label: 'نوع المختبر المطلوب', placeholder: 'مثال: مختبر أشعة' },
+      { key: 'practicalInHall', label: 'مكان العملي', type: 'checkbox', checkLabel: 'يُعطى العملي في قاعة دراسية (لا يحتاج مختبراً)' },
       { key: 'theoryTeacherId', label: 'أستاذ النظري', type: 'select', options: teacherOptions() },
       { key: 'practicalTeacherId', label: 'أستاذ العملي', type: 'select', options: teacherOptions() },
       { key: 'combineTheory', label: 'النظري', type: 'checkbox', checkLabel: 'يُدرَّس النظري لكل شعب المرحلة معاً (في نوع الدراسة نفسه)', default: true, full: true },

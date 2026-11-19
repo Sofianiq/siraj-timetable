@@ -1,21 +1,21 @@
 /**
  * جداول كليات جامعة السراج الأهلية — الفصل الأول 2026-2027 (مُستخرجة من الجداول الرسمية المرفقة).
  * يقرؤها مستورد «js/seed/university.js» ويطابقها مع الكليات والأقسام الموجودة في النظام بالاسم.
- * المصادر: الكلية التقنية الهندسية (الذكاء الاصطناعي، الأمن السيبراني، البناء والإنشاءات)، كلية الإدارة والاقتصاد،
- * كلية الصيدلة، كلية طب الأسنان، كلية القانون والعلوم السياسية (قسم القانون)، كلية العلوم (قسم الأدلة الجنائية)،
+ * المصادر: الكلية التقنية الهندسية (الذكاء الاصطناعي، الأمن السيبراني، البناء والإنشاءات بمجموعتيه A وB، كلية الإدارة والاقتصاد،
+ * وهندسة تقنيات النفط والغاز)، كلية الصيدلة، كلية طب الأسنان، كلية القانون والعلوم السياسية (قسم القانون)، كلية العلوم (قسم الأدلة الجنائية)،
  * وترميز قاعات المبنى SE (المحدَّث: لكل كلية قاعاتها) و«جدول توزيع القاعات الدراسية» على الكليات.
  * الصيغ:
  *   ROOMS:    [مفتاح، الاسم، الرمز، النوع، الكلية، القسم، المبنى]
  *   TEACHERS: [مفتاح، الاسم، الكلية، القسم الأساسي، كليات أخرى يدرّس فيها، يُطابَق مع كادر كلية أخرى؟]
- *   SUBJECTS: [القسم، المرحلة، الاسم، نظري، عملي، أونلاين، أستاذ النظري، أستاذ العملي]
+ *   SUBJECTS: [القسم، المرحلة، الاسم، نظري، عملي، أونلاين، أستاذ النظري، أستاذ العملي، خيارات (hall: العملي في قاعة، separate: نظري كل شعبة وحده)]
  *   GROUPS:   [القسم، المرحلة، الدراسة، المجاميع، اسم الشعبة (اختياري؛ الافتراضي «صباحي»/«مسائي»)]
  *   SESSIONS: [القسم، المرحلة، الدراسة، المادة، النوع t/p، اليوم 0=السبت، من، إلى (دقائق)، الأساتذة، القاعة، المجاميع، ملاحظة، اسم الشعبة]
  */
-export const DATA_VERSION = 4;
+export const DATA_VERSION = 5;
 export const TERM = { year: '2026-2027', semester: 1 };
 
 export const COLLEGES = [
-  {"key":"ENG","name":"الكلية التقنية الهندسية","short":"التقنية الهندسية","match":[["تقني","هندس"]],"logo":"assets/logo-eng.png","hours":{"evening":["12:30","20:30"]},"departments":[{"key":"CONS","name":"قسم هندسة تقنيات البناء والإنشاءات","short":"البناء والإنشاءات","match":[["بناء"],["انشاءات"]]},{"key":"AI","name":"قسم هندسة تقنيات الذكاء الاصطناعي","short":"الذكاء الاصطناعي","match":[["ذكاء"]]},{"key":"CYB","name":"قسم هندسة تقنيات الأمن السيبراني","short":"الأمن السيبراني","match":[["سيبران"]]}]},
+  {"key":"ENG","name":"الكلية التقنية الهندسية","short":"التقنية الهندسية","match":[["تقني","هندس"]],"logo":"assets/logo-eng.png","hours":{"evening":["12:30","20:30"]},"departments":[{"key":"CONS","name":"قسم هندسة تقنيات البناء والإنشاءات","short":"البناء والإنشاءات","match":[["بناء"],["انشاءات"]]},{"key":"AI","name":"قسم هندسة تقنيات الذكاء الاصطناعي","short":"الذكاء الاصطناعي","match":[["ذكاء"]]},{"key":"CYB","name":"قسم هندسة تقنيات الأمن السيبراني","short":"الأمن السيبراني","match":[["سيبران"]]},{"key":"OIL","name":"قسم هندسة تقنيات النفط والغاز","short":"النفط والغاز","match":[["نفط"],["غاز"]],"head":"م.د. عامر ناجي أحمد النعيمي"}]},
   {"key":"ECO","name":"كلية الإدارة والاقتصاد","short":"الإدارة والاقتصاد","match":[["اداره","اقتصاد"]],"departments":[{"key":"BA","name":"قسم إدارة الأعمال","short":"إدارة الأعمال","match":[["اداره","اعمال"]],"head":"أ.م.د. حامد جهاد دليمي"},{"key":"FIN","name":"قسم العلوم المالية والمصرفية","short":"المالية والمصرفية","match":[["مصرفي"],["ماليه"]],"head":"أ.م.د. حمدي إسماعيل احمد"},{"key":"ACC","name":"قسم المحاسبة","short":"المحاسبة","match":[["محاسب"]],"head":"أ.م.د. عادل صالح مهدي"},{"key":"OIL","name":"قسم اقتصاديات النفط والغاز","short":"النفط والغاز","match":[["نفط"],["غاز"]],"head":"أ.د. احمد حسين الهيتي"}]},
   {"key":"PHA","name":"كلية الصيدلة","short":"الصيدلة","match":[["صيدل"]],"logo":"assets/logo-pha.png","departments":[{"key":"GEN","name":"الصيدلة","general":true,"match":[]}]},
   {"key":"DEN","name":"كلية طب الأسنان","short":"طب الأسنان","match":[["طب","اسنان"]],"departments":[{"key":"GEN","name":"طب الأسنان","general":true,"match":[]}]},
@@ -27,6 +27,9 @@ export const COLLEGES = [
 
 /** قاعات ليست دراسية (مكاتب وخدمات) وردت في ملف الترميز فلم تُضف */
 export const SKIPPED_ROOMS = [["SE205","الصحيات"],["SE206","مكتب رؤساء الاقسام – الكلية التقنية الهندسية"],["SE210","عمادة كلية القانون والعلوم السياسية"],["SE105","الصحيات"],["SE106","عمادة كلية العلوم التطبيقية"],["SE110","عمادة كلية التربية"],["SE114","اللجنة الامتحانية"],["SE115","اللجنة الامتحانية"],["SE004","مكتب مستشار رئيس الجامعة"],["SE005","كلية الادارة والاقتصاد – رؤساء الاقسام"],["SE011","قسم التسجيل"],["SE012","قسم الشؤون المالية"]];
+
+/** شعب أُلغيت: تُحذف إن لم يبقَ فيها إلا محاضرات الجدول القديم [القسم، المرحلة، الدراسة] */
+export const REMOVED_GROUPS = [["ENG/CONS",1,"evening"]];
 
 export const ROOMS = [
   ["SE201","SE201","SE201","hall","ENG",null,"المبنى SE – الطابق الثاني"],
@@ -108,6 +111,12 @@ export const TEACHERS = [
   ["e_hudas","م.م. هدى سليمان غالب","ENG","CONS",[],false],
   ["x_abdullah","م.م. عبدالله عبدالرحمن","ENG","AI",["PHA","APS"],true],
   ["x_abdulrazaq","م.م. عبدالرزاق","ENG","CYB",["ECO"],false],
+  ["o_noor","م.م. نور شفيق","ENG","OIL",[],false],
+  ["o_abdullahk","م.د. عبدالله عبدالكريم","ENG","OIL",[],false],
+  ["o_hussein","م.د. حسين وهيب","ENG","OIL",[],false],
+  ["o_amer","م.د. عامر ناجي أحمد النعيمي","ENG","OIL",[],false],
+  ["o_yaseen","م.م. ياسين محمود","ENG","OIL",[],false],
+  ["o_saymaa","م.م. سيماء أزهر","ENG","OIL",[],false],
   ["a_asmaa","م.م. أسماء خالد مخلف","ECO","BA",[],false],
   ["a_marwa","م.م. مروة جمعة","ECO","BA",[],false],
   ["a_salman","د. محمد سلمان","ECO","FIN",[],false],
@@ -201,12 +210,27 @@ export const SUBJECTS = [
   ["ENG/CYB",1,"الرياضيات 1",3,0,1,"e_huda",null],
   ["ENG/CYB",1,"مقدمة في نظم المعلومات",1,2,1,"e_rihan","e_rihan"],
   ["ENG/CYB",1,"الديمقراطية وحقوق الانسان",2,0,0,"x_abdulrazaq",null],
-  ["ENG/CONS",1,"الرسم الهندسي (1)",0,4,0,null,"e_saif"],
-  ["ENG/CONS",1,"المساحة المستوية",2,4,0,"e_mahmed","e_mahmed"],
-  ["ENG/CONS",1,"الرياضيات التطبيقية",6,0,0,"e_ali",null],
-  ["ENG/CONS",1,"اللغة الإنكليزية 1",2,0,0,"e_hudas",null],
-  ["ENG/CONS",1,"الجيولوجيا الهندسية",2,2,0,"e_khaldoon","e_khaldoon"],
-  ["ENG/CONS",1,"حقوق الإنسان والديمقراطية",1,0,0,null,null],
+  ["ENG/CONS",1,"الرسم الهندسي (1)",0,4,0,null,"e_saif",{"separate":true}],
+  ["ENG/CONS",1,"الرياضيات التطبيقية",6,0,0,"e_ali",null,{"separate":true}],
+  ["ENG/CONS",1,"المساحة المستوية",2,4,0,"e_mahmed","e_mahmed",{"separate":true,"hall":true}],
+  ["ENG/CONS",1,"الجيولوجيا الهندسية",2,2,0,"e_khaldoon","e_khaldoon",{"separate":true,"hall":true}],
+  ["ENG/CONS",1,"اللغة الإنكليزية 1",2,0,0,"e_hudas",null,{"separate":true}],
+  ["ENG/CONS",1,"حقوق الإنسان والديمقراطية",1,0,0,null,null,{"separate":true}],
+  ["ENG/OIL",1,"Mathematic 1",4,0,0,"o_noor",null],
+  ["ENG/OIL",1,"General Geology 1",4,0,0,"e_khaldoon",null],
+  ["ENG/OIL",1,"Computer",0,2,0,null,"o_abdullahk"],
+  ["ENG/OIL",1,"Workshop",0,3,0,null,"e_hudas",{"hall":true}],
+  ["ENG/OIL",1,"Engineering Mechanics",4,0,0,"o_hussein",null],
+  ["ENG/OIL",1,"Principle of Petroleum Engineering",4,0,0,"o_amer",null],
+  ["ENG/OIL",1,"English",2,0,0,"o_saymaa",null],
+  ["ENG/OIL",2,"Structural Geology",4,0,0,"e_khaldoon",null],
+  ["ENG/OIL",2,"Computer Programming",1,2,0,"o_abdullahk","o_abdullahk"],
+  ["ENG/OIL",2,"Ordinary Differential Equations",5,0,0,"o_noor",null],
+  ["ENG/OIL",2,"Fluid Mechanic I",4,0,0,"o_yaseen",null],
+  ["ENG/OIL",2,"English Language",2,0,0,"o_saymaa",null],
+  ["ENG/OIL",2,"Statistics and Optimization",2,0,0,"o_amer",null],
+  ["ENG/OIL",2,"Statistics (Tutorial)",2,0,0,"o_amer",null],
+  ["ENG/OIL",2,"Crimes of the Baath regime in Iraq",2,0,0,"x_abdullah",null],
   ["ECO/ACC",1,"رياضيات عامة",3,0,0,"a_yaseen",null],
   ["ECO/ACC",1,"أساسيات المحاسبة المالية",4,0,0,"a_falah",null],
   ["ECO/ACC",1,"اللغة الإنكليزية",2,0,0,"a_mustafa",null],
@@ -350,11 +374,12 @@ export const GROUPS = [
   ["ENG/AI",1,"evening",[]],
   ["ENG/AI",2,"evening",[]],
   ["ENG/AI",2,"morning",[]],
-  ["ENG/CONS",1,"evening",["A","B","C","D"]],
   ["ENG/CONS",1,"morning",[],"المجموعة A"],
   ["ENG/CONS",1,"morning",[],"المجموعة B"],
   ["ENG/CYB",1,"morning",[]],
   ["ENG/CYB",2,"morning",[]],
+  ["ENG/OIL",1,"morning",[]],
+  ["ENG/OIL",2,"morning",[]],
   ["LAW/LAW",1,"morning",[]],
   ["PHA/GEN",1,"morning",["A","B","C","D"]],
   ["PHA/GEN",2,"morning",["A","B","C","D"]],
@@ -641,49 +666,32 @@ export const SESSIONS = [
   ["ENG/AI",2,"morning","البرمجة الشيئية","t",3,570,690,["e_yousif"],"SE208",[]],
   ["ENG/AI",2,"morning","المعالجات الدقيقة","p",3,690,810,["e_maher"],"ENG-PC1",[]],
   ["ENG/AI",2,"morning","المعالجات الدقيقة","t",3,810,930,["e_maher"],"SE208",[]],
-  // ENG/CONS — المرحلة 1 — مسائي
-  ["ENG/CONS",1,"evening","الرسم الهندسي (1)","p",0,870,990,["e_saif","e_rajab"],null,["A","C"]],
-  ["ENG/CONS",1,"evening","المساحة المستوية","p",0,870,990,["e_mahmed","e_asmaai"],null,["B","D"]],
-  ["ENG/CONS",1,"evening","المساحة المستوية","t",0,990,1110,["e_mahmed","e_asmaai"],null,[]],
-  ["ENG/CONS",1,"evening","المساحة المستوية","p",0,1110,1170,["e_mahmed","e_asmaai"],null,["A","C"]],
-  ["ENG/CONS",1,"evening","الرسم الهندسي (1)","p",0,1110,1170,["e_saif"],null,["B","D"]],
-  ["ENG/CONS",1,"evening","الرياضيات التطبيقية","t",1,870,990,["e_ali"],null,[]],
-  ["ENG/CONS",1,"evening","اللغة الإنكليزية 1","t",1,990,1110,["e_hudas"],null,[]],
-  ["ENG/CONS",1,"evening","الرياضيات التطبيقية","t",1,1110,1170,["e_ali"],null,[]],
-  ["ENG/CONS",1,"evening","الرسم الهندسي (1)","p",2,870,990,["e_saif","e_rajab"],null,["A","C"],"محاضر خارجي"],
-  ["ENG/CONS",1,"evening","المساحة المستوية","p",2,870,990,["e_mahmed","e_asmaai"],null,["B","D"]],
-  ["ENG/CONS",1,"evening","الجيولوجيا الهندسية","t",2,990,1110,["e_khaldoon"],null,[]],
-  ["ENG/CONS",1,"evening","المساحة المستوية","p",2,1110,1170,["e_mahmed","e_asmaai"],null,["A","C"]],
-  ["ENG/CONS",1,"evening","الرسم الهندسي (1)","p",2,1110,1170,["e_saif"],null,["B","D"],"محاضر خارجي"],
-  ["ENG/CONS",1,"evening","الرياضيات التطبيقية","t",3,870,990,["e_ali"],null,[]],
-  ["ENG/CONS",1,"evening","الجيولوجيا الهندسية","p",3,990,1110,["e_khaldoon"],null,[]],
-  ["ENG/CONS",1,"evening","حقوق الإنسان والديمقراطية","t",3,1110,1170,[],null,[]],
   // ENG/CONS — المرحلة 1 — صباحي — المجموعة A
   ["ENG/CONS",1,"morning","الرسم الهندسي (1)","p",0,510,630,["e_saif","e_rajab"],"ENG-DRAW",[],"","المجموعة A"],
-  ["ENG/CONS",1,"morning","اللغة الإنكليزية 1","t",0,630,750,["e_hudas"],"SE202",[],"","المجموعة A"],
-  ["ENG/CONS",1,"morning","الرياضيات التطبيقية","t",0,750,870,["e_ali"],"SE202",[],"","المجموعة A"],
+  ["ENG/CONS",1,"morning","الرياضيات التطبيقية","t",0,630,750,["e_ali"],"SE202",[],"","المجموعة A"],
+  ["ENG/CONS",1,"morning","المساحة المستوية","t",0,780,900,["e_mahmed","e_asmaai"],"SE202",[],"","المجموعة A"],
   ["ENG/CONS",1,"morning","الجيولوجيا الهندسية","t",1,510,630,["e_khaldoon"],"SE202",[],"","المجموعة A"],
-  ["ENG/CONS",1,"morning","الرسم الهندسي (1)","p",1,630,750,["e_saif","e_rajab"],"ENG-DRAW",[],"","المجموعة A"],
-  ["ENG/CONS",1,"morning","المساحة المستوية","t",1,750,870,["e_mahmed","e_asmaai"],"SE202",[],"","المجموعة A"],
-  ["ENG/CONS",1,"morning","الجيولوجيا الهندسية","p",2,510,630,["e_khaldoon"],"SE202",[],"","المجموعة A"],
-  ["ENG/CONS",1,"morning","الرياضيات التطبيقية","t",2,630,750,["e_ali"],"SE202",[],"","المجموعة A"],
-  ["ENG/CONS",1,"morning","المساحة المستوية","p",2,750,870,["e_mahmed","e_asmaai"],"SE202",[],"","المجموعة A"],
-  ["ENG/CONS",1,"morning","الرياضيات التطبيقية","t",3,510,630,["e_ali"],"SE202",[],"","المجموعة A"],
-  ["ENG/CONS",1,"morning","المساحة المستوية","p",3,630,750,["e_mahmed","e_asmaai"],"SE202",[],"","المجموعة A"],
-  ["ENG/CONS",1,"morning","حقوق الإنسان والديمقراطية","t",3,750,810,[],"SE202",[],"","المجموعة A"],
+  ["ENG/CONS",1,"morning","الرياضيات التطبيقية","t",1,630,750,["e_ali"],"SE202",[],"","المجموعة A"],
+  ["ENG/CONS",1,"morning","المساحة المستوية","p",1,780,900,["e_mahmed","e_asmaai"],"SE202",[],"","المجموعة A"],
+  ["ENG/CONS",1,"morning","اللغة الإنكليزية 1","t",2,510,630,["e_hudas"],"SE202",[],"","المجموعة A"],
+  ["ENG/CONS",1,"morning","الجيولوجيا الهندسية","p",2,630,750,["e_khaldoon"],"SE202",[],"","المجموعة A"],
+  ["ENG/CONS",1,"morning","المساحة المستوية","p",2,780,900,["e_mahmed","e_asmaai"],"SE202",[],"","المجموعة A"],
+  ["ENG/CONS",1,"morning","الرسم الهندسي (1)","p",3,510,630,["e_saif","e_rajab"],"ENG-DRAW",[],"","المجموعة A"],
+  ["ENG/CONS",1,"morning","الرياضيات التطبيقية","t",3,630,750,["e_ali"],"SE202",[],"","المجموعة A"],
+  ["ENG/CONS",1,"morning","حقوق الإنسان والديمقراطية","t",3,780,840,[],"SE202",[],"","المجموعة A"],
   // ENG/CONS — المرحلة 1 — صباحي — المجموعة B
-  ["ENG/CONS",1,"morning","اللغة الإنكليزية 1","t",0,510,630,["e_hudas"],"SE203",[],"","المجموعة B"],
-  ["ENG/CONS",1,"morning","الرياضيات التطبيقية","t",0,630,750,["e_ali"],"SE203",[],"","المجموعة B"],
-  ["ENG/CONS",1,"morning","الرسم الهندسي (1)","p",0,750,870,["e_saif","e_rajab"],"ENG-DRAW",[],"","المجموعة B"],
-  ["ENG/CONS",1,"morning","المساحة المستوية","t",1,510,630,["e_mahmed","e_asmaai"],"SE203",[],"","المجموعة B"],
-  ["ENG/CONS",1,"morning","الجيولوجيا الهندسية","t",1,630,750,["e_khaldoon"],"SE203",[],"","المجموعة B"],
-  ["ENG/CONS",1,"morning","الرسم الهندسي (1)","p",1,750,870,["e_saif","e_rajab"],"ENG-DRAW",[],"","المجموعة B"],
-  ["ENG/CONS",1,"morning","الرياضيات التطبيقية","t",2,510,630,["e_ali"],"SE203",[],"","المجموعة B"],
+  ["ENG/CONS",1,"morning","الرياضيات التطبيقية","t",0,510,630,["e_ali"],"SE203",[],"","المجموعة B"],
+  ["ENG/CONS",1,"morning","المساحة المستوية","t",0,630,750,["e_mahmed","e_asmaai"],"SE203",[],"","المجموعة B"],
+  ["ENG/CONS",1,"morning","الرسم الهندسي (1)","p",0,780,900,["e_saif","e_rajab"],"ENG-DRAW",[],"","المجموعة B"],
+  ["ENG/CONS",1,"morning","الرياضيات التطبيقية","t",1,510,630,["e_ali"],"SE203",[],"","المجموعة B"],
+  ["ENG/CONS",1,"morning","المساحة المستوية","p",1,630,750,["e_mahmed","e_asmaai"],"SE203",[],"","المجموعة B"],
+  ["ENG/CONS",1,"morning","الجيولوجيا الهندسية","t",1,780,900,["e_khaldoon"],"SE203",[],"","المجموعة B"],
+  ["ENG/CONS",1,"morning","الجيولوجيا الهندسية","p",2,510,630,["e_khaldoon"],"SE203",[],"","المجموعة B"],
   ["ENG/CONS",1,"morning","المساحة المستوية","p",2,630,750,["e_mahmed","e_asmaai"],"SE203",[],"","المجموعة B"],
-  ["ENG/CONS",1,"morning","الجيولوجيا الهندسية","p",2,750,870,["e_khaldoon"],"SE203",[],"","المجموعة B"],
-  ["ENG/CONS",1,"morning","المساحة المستوية","p",3,510,630,["e_mahmed","e_asmaai"],"SE203",[],"","المجموعة B"],
-  ["ENG/CONS",1,"morning","الرياضيات التطبيقية","t",3,630,750,["e_ali"],"SE203",[],"","المجموعة B"],
-  ["ENG/CONS",1,"morning","حقوق الإنسان والديمقراطية","t",3,810,870,[],"SE203",[],"","المجموعة B"],
+  ["ENG/CONS",1,"morning","اللغة الإنكليزية 1","t",2,780,900,["e_hudas"],"SE203",[],"","المجموعة B"],
+  ["ENG/CONS",1,"morning","الرياضيات التطبيقية","t",3,510,630,["e_ali"],"SE203",[],"","المجموعة B"],
+  ["ENG/CONS",1,"morning","الرسم الهندسي (1)","p",3,630,750,["e_saif","e_rajab"],"ENG-DRAW",[],"","المجموعة B"],
+  ["ENG/CONS",1,"morning","حقوق الإنسان والديمقراطية","t",3,840,900,[],"SE203",[],"","المجموعة B"],
   // ENG/CYB — المرحلة 1 — صباحي
   ["ENG/CYB",1,"morning","الرسم الهندسي","p",1,510,630,["e_shireen"],"ENG-DRAW",[]],
   ["ENG/CYB",1,"morning","اسس الهندسة الكهربائية","t",1,630,750,["e_qasim"],"SE009",[]],
@@ -711,6 +719,31 @@ export const SESSIONS = [
   ["ENG/CYB",2,"morning","تركيب ومعمارية الحاسوب","t",3,630,690,["e_maher"],"SE009",[]],
   ["ENG/CYB",2,"morning","مبادئ اللينوكس","t",3,690,810,["e_omarf"],"SE208",[]],
   ["ENG/CYB",2,"morning","الرياضيات الهندسية","t",3,810,870,["e_huda"],"SE201",[]],
+  // ENG/OIL — المرحلة 1 — صباحي
+  ["ENG/OIL",1,"morning","Mathematic 1","t",0,510,630,["o_noor"],"SE213",[]],
+  ["ENG/OIL",1,"morning","General Geology 1","t",0,630,750,["e_khaldoon"],"SE213",[]],
+  ["ENG/OIL",1,"morning","Computer","p",0,750,870,["o_abdullahk"],"ENG-PROG",[]],
+  ["ENG/OIL",1,"morning","Mathematic 1","t",1,510,630,["o_noor"],"SE213",[]],
+  ["ENG/OIL",1,"morning","Workshop","p",1,630,810,["e_hudas"],"SE213",[]],
+  ["ENG/OIL",1,"morning","Engineering Mechanics","t",3,510,630,["o_hussein"],"SE213",[]],
+  ["ENG/OIL",1,"morning","General Geology 1","t",3,630,750,["e_khaldoon"],"SE213",[]],
+  ["ENG/OIL",1,"morning","Principle of Petroleum Engineering","t",3,750,870,["o_amer","o_yaseen"],"SE213",[]],
+  ["ENG/OIL",1,"morning","Engineering Mechanics","t",4,510,630,["o_hussein"],"SE213",[]],
+  ["ENG/OIL",1,"morning","English","t",4,630,750,["o_saymaa"],"SE213",[]],
+  ["ENG/OIL",1,"morning","Principle of Petroleum Engineering","t",4,750,870,["o_amer","o_yaseen"],"SE213",[]],
+  // ENG/OIL — المرحلة 2 — صباحي
+  ["ENG/OIL",2,"morning","Structural Geology","t",0,510,630,["e_khaldoon"],"SE214",[]],
+  ["ENG/OIL",2,"morning","Computer Programming","t",0,630,690,["o_abdullahk"],"SE214",[]],
+  ["ENG/OIL",2,"morning","Ordinary Differential Equations","t",0,690,870,["o_noor"],"SE214",[]],
+  ["ENG/OIL",2,"morning","Computer Programming","p",1,510,630,["o_abdullahk"],"ENG-PROG",[]],
+  ["ENG/OIL",2,"morning","Fluid Mechanic I","t",1,630,750,["o_yaseen"],"SE214",[]],
+  ["ENG/OIL",2,"morning","Ordinary Differential Equations","t",1,750,870,["o_noor"],"SE214",[]],
+  ["ENG/OIL",2,"morning","Structural Geology","t",3,510,630,["e_khaldoon"],"SE214",[]],
+  ["ENG/OIL",2,"morning","Fluid Mechanic I","t",3,630,750,["o_yaseen"],"SE214",[]],
+  ["ENG/OIL",2,"morning","English Language","t",3,750,870,["o_saymaa"],"SE214",[]],
+  ["ENG/OIL",2,"morning","Statistics and Optimization","t",4,510,630,["o_amer"],"SE214",[]],
+  ["ENG/OIL",2,"morning","Statistics (Tutorial)","t",4,630,750,["o_amer"],"SE214",[]],
+  ["ENG/OIL",2,"morning","Crimes of the Baath regime in Iraq","t",4,750,870,["x_abdullah"],"SE214",[]],
   // LAW/LAW — المرحلة 1 — صباحي
   ["LAW/LAW",1,"morning","نظرية الدولة","t",0,510,555,["l_omar"],"SE217",[]],
   ["LAW/LAW",1,"morning","نظرية الدولة","t",0,570,615,["l_omar"],"SE217",[]],
