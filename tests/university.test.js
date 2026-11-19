@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { universityImportPlan, matchName, TERM } from '../js/seed/university.js';
+import { universityImportPlan, matchName, TERM, importSignature } from '../js/seed/university.js';
 import { SESSIONS, TEACHERS, ROOMS } from '../js/seed/university-data.js';
 import { checkAll, buildCtx, teachersOf, shiftWindow } from '../js/conflicts.js';
 import { normPerson } from '../js/text.js';
@@ -174,5 +174,76 @@ test('updated room codes: offices are retired (deleted if unused, disabled if us
   const res = checkAll([{ id: 'x', term: 't', deptId: 'acc', kind: 'theory', roomId: se201.id, day: 0, start: 510, end: 570, groupIds: [] }], ctx);
   assert.ok(res.get('x').some((i) => i.type === 'roomOwner'));
   // إعادة الاستيراد بعد التحديث لا تكتب شيئاً
+  assert.equal(universityImportPlan(after, ids()).ops.length, 0);
+});
+
+const ecoNoHall = (list) => list.filter((x) => x.roomId == null).length;
+test('v3 update: Law and Forensic Evidence timetables are added and halls follow the official allocation, without touching earlier timetables', () => {
+  const data = base();
+  const first = apply(data, universityImportPlan(data, ids()).ops);
+  // محاكاة بيانات الإصدار السابق: محاضرات الإدارة والاقتصاد بلا قاعة، ومحاضرة عدّلها المستخدم يدوياً، ومحاضرة أضافها بنفسه
+  const eco = first.sessions.filter((x) => x.deptId === 'acc');
+  const v2 = (x) => { const o = { ...x, roomId: null }; return { ...o, importSig: importSignature(o) }; };
+  const prev = { ...first, sessions: first.sessions.map((x) => (x.deptId === 'acc' ? v2(x) : x)) };
+  const edited = eco[0];
+  prev.sessions = prev.sessions.map((x) => (x.id === edited.id ? { ...x, start: x.start + 30, end: x.end + 30 } : x));
+  prev.sessions.push({ id: 'mine', term: '2026-2027/1', deptId: 'acc', groupIds: [eco[1].groupIds[0]], day: 4, start: 510, end: 570, source: 'manual' });
+  const before = new Map(prev.sessions.map((x) => [x.id, x]));
+  const { ops, report } = universityImportPlan(prev, ids());
+  const after = apply(prev, ops);
+  // لا تُحذف أي محاضرة سابقة (خيار الاستبدال غير مفعّل)، والمحاضرة المضافة يدوياً باقية
+  assert.ok(!ops.some((o) => o.col === 'sessions' && o.op === 'delete'));
+  assert.ok(after.sessions.some((x) => x.id === 'mine'));
+  assert.ok(report.existingOther >= 1);
+  // المحاضرة التي عدّلها المستخدم تبقى كما هي
+  assert.deepEqual(after.sessions.find((x) => x.id === edited.id), before.get(edited.id));
+  // المحاضرات السابقة: الوقت والمادة والأستاذ والشعبة لم تتغير؛ التغيير الوحيد قاعة للإدارة والاقتصاد
+  const touched = ops.filter((o) => o.col === 'sessions' && before.has(o.id));
+  assert.equal(touched.length, eco.length - 1 - ecoNoHall(eco));
+  for (const o of touched) {
+    const b = before.get(o.id);
+    for (const k of ['day', 'start', 'end', 'subjectId', 'teacherId', 'groupIds', 'kind']) assert.deepEqual(o.data[k], b[k], k);
+    assert.equal(b.deptId, 'acc');
+    assert.ok(o.data.roomId);
+  }
+  // الكليتان الجديدتان: الأقسام والعميد والشعار
+  const law = after.colleges.find((c) => c.name === 'كلية القانون والعلوم السياسية');
+  assert.equal(law.dean, 'أ.م.د. قحطان عبدالستار طه');
+  assert.equal(law.logo, 'assets/logo-law.png');
+  const lawDept = after.departments.find((d) => d.collegeId === law.id);
+  assert.equal(lawDept.name, 'قسم القانون');
+  const sci = after.colleges.find((c) => c.name === 'كلية العلوم التطبيقية');
+  const forDept = after.departments.find((d) => d.collegeId === sci.id);
+  assert.equal(forDept.name, 'قسم الأدلة الجنائية');
+  const room = (id) => after.rooms.find((r) => r.id === id);
+  const lawS = after.sessions.filter((x) => x.deptId === lawDept.id);
+  const sciS = after.sessions.filter((x) => x.deptId === forDept.id);
+  assert.equal(lawS.length, 15);
+  assert.equal(sciS.length, 10);
+  // حصص القانون 45 دقيقة في SE217؛ نظري الأدلة الجنائية في SE107 والعملي في مختبرات الكلية
+  assert.ok(lawS.every((x) => x.end - x.start === 45 && room(x.roomId).name === 'SE217'));
+  assert.ok(sciS.filter((x) => x.kind === 'theory').every((x) => room(x.roomId).name === 'SE107'));
+  assert.ok(sciS.filter((x) => x.kind === 'practical').every((x) => room(x.roomId).type === 'lab' && room(x.roomId).collegeId === sci.id));
+  // المحاضرة المشتركة بين أستاذين (عملي التشريح والفسلجة)
+  assert.ok(sciS.some((x) => x.coTeacherIds.length === 1));
+  // الأساتذة المشتركون يُربطون بسجلهم ولا يتكررون
+  for (const who of ['باسم ناصر', 'جمال ناصر', 'عمر فلاح']) {
+    assert.equal(after.teachers.filter((t) => t.name.includes(who) && !t.name.includes('م.م')).length, 1, who);
+  }
+  assert.ok(after.teachers.find((t) => t.name.includes('باسم ناصر')).sharedColleges.includes(sci.id));
+  // قاعات التوزيع: SE003 وSE204 وSE216 قاعات دراسية لكلياتها
+  for (const [code, cid] of [['SE003', 'ec'], ['SE204', 'en'], ['SE216', law.id]]) {
+    const r = after.rooms.find((x) => x.code === code);
+    assert.equal(r.type, 'hall', code);
+    assert.equal(r.collegeId, cid, code);
+  }
+  // قاعات الإدارة والاقتصاد من قاعاتها فقط، ولا تتعارض قاعة أو شعبة بين المحاضرات المستوردة
+  const ecoS = after.sessions.filter((x) => x.source === 'university' && ['acc'].includes(x.deptId) && x.roomId);
+  assert.ok(ecoS.length > 0);
+  for (const x of ecoS) assert.equal(room(x.roomId).collegeId, 'ec', `${room(x.roomId).name} ${x.day} ${x.start}`);
+  const ctx = buildCtx({ ...after, settings: after.settings[0] });
+  const imported = after.sessions.filter((x) => x.source === 'university' && [lawDept.id, forDept.id, 'acc'].includes(x.deptId) && x.id !== edited.id);
+  for (const [, list] of checkAll(imported, ctx)) for (const i of list) assert.ok(!['room', 'group', 'roomOwner'].includes(i.type), i.message);
+  // إعادة الاستيراد لا تكتب شيئاً
   assert.equal(universityImportPlan(after, ids()).ops.length, 0);
 });

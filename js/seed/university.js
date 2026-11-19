@@ -30,11 +30,14 @@ function hashId(text) {
   for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193); }
   return `tt${(h >>> 0).toString(36)}${text.length.toString(36)}`;
 }
+/** بصمة الحقول المستوردة في المحاضرة: تكشف إن عدّلها المستخدم يدوياً بعد الاستيراد */
+export const importSignature = (o) => hashId(JSON.stringify(SIG_FIELDS.map((k) => o[k] ?? null)));
 /** اللقب العلمي من بداية الاسم */
 function titleOf(name) {
   const n = normName(name);
   if (/^ا\s*\.\s*م\s*\.\s*د/.test(n)) return 'أستاذ مساعد';
   if (/^ا\s*\.\s*د/.test(n)) return 'أستاذ';
+  if (/^ا\s*\.\s*م/.test(n)) return 'أستاذ مساعد';
   if (/^م\s*\.\s*د/.test(n)) return 'مدرس';
   if (/^م\s*\.\s*م/.test(n)) return 'مدرس مساعد';
   if (/^م\s*\./.test(n)) return 'مدرس';
@@ -68,6 +71,7 @@ export function universityImportPlan(data, uid, { replace = false } = {}) {
       // تُكمَّل الحقول الفارغة فقط، ولا يُغيَّر ما أدخله المستخدم
       const patch = {};
       if (C.logo && !c.logo) patch.logo = C.logo;
+      if (C.dean && !c.dean) patch.dean = C.dean;
       for (const [k, v] of Object.entries(hours)) if (!c[k]) patch[k] = v;
       if (Object.keys(patch).length) { ops.push({ op: 'update', col: 'colleges', id: c.id, data: patch }); report.updated.colleges++; }
       report.colleges.push({ key: C.key, name: c.name, status: 'matched', rooms: C.roomsOnly });
@@ -75,7 +79,7 @@ export function universityImportPlan(data, uid, { replace = false } = {}) {
       report.warnings.push(`لم يُعثر على «${C.name}» في النظام، فلن تُربط بها قاعاتها في الترميز.`);
     } else {
       const id = uid();
-      const doc = { name: C.name, short: C.short, order: ++order, own: true, ...(C.logo ? { logo: C.logo } : {}), ...hours };
+      const doc = { name: C.name, short: C.short, order: ++order, own: true, ...(C.logo ? { logo: C.logo } : {}), ...(C.dean ? { dean: C.dean } : {}), ...hours };
       ops.push({ op: 'set', col: 'colleges', id, data: doc });
       colleges.push({ id, ...doc });
       collegeId[C.key] = id;
@@ -274,8 +278,7 @@ export function universityImportPlan(data, uid, { replace = false } = {}) {
       teacherId: tids[0] || null, coTeacherIds: tids.slice(1), roomId: (rkey && roomId[rkey]) || null,
       day, start, end, locked: true, auto: false, note: note || '', source: 'university',
     };
-    // بصمة الحقول المستوردة: تكشف إن عدّل المستخدم المحاضرة يدوياً بعد الاستيراد
-    const sig = (o) => hashId(JSON.stringify(SIG_FIELDS.map((k) => o[k] ?? null)));
+    const sig = importSignature;
     doc.importSig = sig(doc);
     const old = existingIds.has(id) ? sessions.find((x) => x.id === id) : null;
     if (old) {

@@ -43,6 +43,7 @@ const KNOWN_LOGOS = [
   { words: ['تقنيات', 'صحي'], src: 'assets/logo-hmt.png' },
   { words: ['تقني', 'هندس'], src: 'assets/logo-eng.png' },
   { words: ['صيدل'], src: 'assets/logo-pha.png' },
+  { words: ['قانون'], src: 'assets/logo-law.png' },
 ];
 /** شعار الجامعة: يُطبع في الجهة المقابلة لشعار الكلية */
 export const UNIVERSITY_LOGO = 'assets/logo-siraj.png';
@@ -53,6 +54,14 @@ export function collegeLogo(collegeId) {
   const n = normName(c.name);
   if (n === normName(HMT_COLLEGE)) return 'assets/logo-hmt.png';
   return KNOWN_LOGOS.find((k) => k.words.every((w) => n.includes(normName(w))))?.src || '';
+}
+
+/** من يوقّع جدول القسم: رئيس القسم، أو العميد في الكلية بلا أقسام أو ذات القسم الواحد الذي لم يُسجَّل له رئيس */
+function signer(d) {
+  const c = byId('colleges', d?.collegeId);
+  const single = !!d && store.data.departments.filter((x) => x.collegeId === d.collegeId).length === 1;
+  if (d?.general || (!d?.head && c?.dean && single)) return ['عميد الكلية', c?.dean || ''];
+  return ['رئيس القسم', d?.head || ''];
 }
 
 function printInfo(type, id, days) {
@@ -72,14 +81,13 @@ function printInfo(type, id, days) {
     info.meta.push(stage ? stageName(stage) + sub : 'محاضرات غير مرتبطة بشعبة');
     info.shift = g?.shift || 'morning';
     info.theme = themeKeyForDept(d?.id);
-    if (d?.general) info.sign = 'عميد الكلية';
-    info.signName = d?.general ? byId('colleges', d?.collegeId)?.dean || '' : d?.head || '';
+    [info.sign, info.signName] = signer(d);
   } else if (type === 'dept') {
     const d = byId('departments', id);
     info.org.push(...deptOrg(d));
     info.meta.push(d?.general ? 'الجدول العام' : d?.short || d?.name || '');
     info.theme = themeKeyForDept(id);
-    info.signName = d?.general ? byId('colleges', d?.collegeId)?.dean || '' : d?.head || '';
+    [info.sign, info.signName] = signer(d);
   } else if (type === 'college') {
     info.org.push(collegeName(id));
     info.meta.push('الجدول العام');
