@@ -119,7 +119,7 @@ export function checkSession(s, all, ctx) {
     }
     // لكل كلية قاعاتها: محاضرة في قاعة مملوكة لكلية أخرى (الحجوزات الخارجية مستثناة)
     const sCollege = ctx.departments?.get(s.deptId)?.collegeId;
-    if (s.kind !== 'external' && room.collegeId && sCollege && room.collegeId !== sCollege) {
+    if (s.kind !== 'external' && !s.sharedRoom && room.collegeId && sCollege && room.collegeId !== sCollege) {
       const owner = ctx.colleges?.get(room.collegeId);
       issues.push({ level: 'warning', type: 'roomOwner', message: `${room.name} من قاعات ${owner?.name || 'كلية أخرى'}` });
     }

@@ -3,13 +3,13 @@
  */
 import { store, settings, batchWrite, uid, isAdmin, exportAll } from '../store.js';
 import { esc, el, $, modal, toast, download } from '../ui.js';
-import { SEMESTERS } from '../timeutil.js';
+import { SEMESTERS, DAY_NAMES, formatTime } from '../timeutil.js';
 import { ltr } from '../model.js';
 import { universityImportPlan, importSummary, DATA_VERSION, TERM, SKIPPED_ROOMS } from '../seed/university.js';
 
 /** ملاحظات من الجداول الأصلية تحتاج قرار الكلية (تظهر في المعاينة والتقرير) */
 const SOURCE_NOTES = [
-  'طب الأسنان: الجداول تضع كل المحاضرات النظرية للمراحل الثلاث في «قاعة الفلوجة»، فتتعارض المرحلة الأولى مع الثانية والثالثة في القاعة (كما ورد في ملاحظة الكلية: الحاجة إلى قاعة للمرحلة الأولى سعة 40–50 طالباً). ستظهر هذه التعارضات في صفحة «التعارضات» لتُحل بتخصيص قاعة.',
+  'طب الأسنان: جداول جديدة للمراحل الثلاث تحل محل السابقة (المواد والساعات والأساتذة والمختبرات كما هي)، بنموذج قيود: لا تداخل لأستاذ أو قاعة أو مختبر أو مجموعة، الدوام 8:30–2:30 بلا فراغات، النظري قبل العملي دائماً، ومواد طب الأسنان كلها في قاعة الفلوجة. نظري الكلية 40 ساعة وسعة القاعة 30، فالمواد العامة الزائدة (ومنها حقوق الإنسان واللغة العربية) في قاعات التقنيات الصحية الشاغرة (قاعتا الأشعة ثم بغداد، لا هاشمية الأنبار) تُختار وقت الاستيراد. مجاميع العملي A وB وC تتناوب على المختبرات.',
   'الذكاء الاصطناعي: جدول المرحلة الثانية المسائي نسخة من الصباحي مزاحة 4 ساعات بالأساتذة والقاعات أنفسهم، فيتداخل الأساتذة بين الدراستين بعد الظهر.',
   'البناء والإنشاءات: «الجيولوجيا الهندسية» يوم الثلاثاء نظري في الجدول الصباحي و«مختبر» في المسائي؛ استُورد كما ورد في كل جدول.',
   'الدوام الرسمي الموحّد 8:30 – 3:00: المحاضرات التي تتجاوزه في الجداول الأصلية (الصيدلة حتى 3:30، وطب الأسنان حتى 4:30، والمرحلة الثانية الصباحية للذكاء الاصطناعي حتى 3:30) تُستورد كما هي ويظهر لها تنبيه «خارج وقت الدوام» لإعادة جدولتها.',
@@ -27,7 +27,7 @@ const SOURCE_NOTES = [
 
 /** هل الاستيراد متاح ولم يُنفَّذ بعد بالإصدار الحالي من البيانات؟ */
 export const universityImportPending = () => isAdmin() && (settings().universityImport?.version || 0) < DATA_VERSION;
-/** استُوردت الجداول سابقاً بإصدار أقدم من البيانات (التحديث الحالي: الأدلة الجنائية – المرحلة الأولى) */
+/** استُوردت الجداول سابقاً بإصدار أقدم من البيانات (التحديث الحالي: جداول طب الأسنان الجديدة) */
 export const universityImportIsUpdate = () => (settings().universityImport?.version || 0) > 0;
 
 export async function openUniversityImport() {
@@ -54,6 +54,9 @@ export async function openUniversityImport() {
     ${r.warnings.map((w) => `<div class="banner warn">⚠️ ${esc(w)}</div>`).join('')}
     ${termNow !== termData ? `<label class="chk uimp-opt"><input type="checkbox" id="setTerm" checked> اجعل الفصل الحالي في الإعدادات <b>${esc(SEMESTERS[TERM.semester])} ${ltr(TERM.year)}</b> (الحالي: ${esc(SEMESTERS[st.semester] || '')} ${ltr(st.academicYear || '')}) حتى تظهر الجداول المستوردة</label>` : ''}
     ${r.removed.length ? `<div class="banner info">🔁 جدول جديد يحل محل القديم: تُحذف ${r.removed.length} محاضرة من الجدول القديم (${[...new Set(r.removed)].map(esc).join('، ')})${r.renamedGroups.length ? `، وتصبح الشعبة ${r.renamedGroups.map((x) => `«${esc(x.from)}» «${esc(x.to)}»`).join(' و')}` : ''}.</div>` : ''}
+    ${r.replacedTimetables ? `<div class="banner info">🔁 جداول تُبنى من جديد بالكامل (طب الأسنان): تُحذف ${r.replacedTimetables} محاضرة أخرى من جداولها السابقة، ومنها ما عُدّل يدوياً.</div>` : ''}
+    ${r.sharedRooms.length ? `<div class="banner info">🏛 ${r.sharedRooms.length} محاضرة في قاعات كليات أخرى بالاتفاق (اختيرت القاعة الشاغرة وقتها في بيانات النظام الحالية): ${[...new Set(r.sharedRooms.map((x) => x.room))].map(esc).join('، ')}.</div>` : ''}
+    ${r.noRoom.length ? `<div class="banner warn">🚪 ${r.noRoom.length} محاضرة لم تُوجد لها قاعة شاغرة بين البدائل في وقتها، فتُستورد بلا قاعة لتخصّصها من صفحة الجداول: ${r.noRoom.map((x) => `${esc(DAY_NAMES[x.day] || '')} ${esc(formatTime(x.start))}`).join('، ')}.</div>` : ''}
     ${r.removedGroups.length ? `<div class="banner info">🗑 تُحذف الشعبة الملغاة: ${r.removedGroups.map(esc).join('، ')}.</div>` : ''}
     ${r.keptEdited.length ? `<div class="banner warn">✋ ${r.keptEdited.length} محاضرة من الجدول القديم عدّلتها يدوياً فلن تُحذف (${[...new Set(r.keptEdited)].map(esc).join('، ')}) — احذفها بنفسك إن لم تعد لازمة.</div>` : ''}
     ${r.existingOther ? `<label class="chk uimp-opt"><input type="checkbox" id="replace" ${universityImportIsUpdate() ? '' : 'checked'}> توجد <b>${r.existingOther}</b> محاضرة مسجّلة مسبقاً لشعب هذه الجداول في الفصل نفسه — تُحذف وتُعتمد الجداول الرسمية المستوردة، حتى لا تتكرر المحاضرات. ${universityImportIsUpdate() ? 'غير محدَّد في التحديث حتى تبقى المحاضرات التي أضفتها بنفسك.' : 'ألغِ التحديد للإبقاء عليها.'}</label>` : ''}

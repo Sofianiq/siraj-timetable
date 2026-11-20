@@ -413,3 +413,50 @@ test('v8: Forensic Evidence stage 1 added as in its timetable, with its halls; s
   assert.deepEqual([...new Set(teacherClash)], ['1-630']);
   assert.equal(universityImportPlan(after, ids()).ops.length, 0);
 });
+
+test('v9: Dentistry rebuilt for its three stages — no clash, no gaps, theory before practical, dental subjects in Fallujah hall, shared halls chosen free at import', () => {
+  const data = base();
+  // قاعات التقنيات الصحية كما في النظام، ومحاضرة لها تشغل «قاعة الاشعة 2» يوم السبت 8:30–12:30
+  data.rooms.push({ id: 'rad1', name: 'قاعة الاشعة 1', type: 'hall', collegeId: 'hmt' }, { id: 'rad2', name: 'قاعة الاشعة 2', type: 'hall', collegeId: 'hmt' },
+    { id: 'bgd', name: 'بغداد', type: 'hall', collegeId: 'hmt' }, { id: 'hsh', name: 'هاشمية الانبار', type: 'hall', collegeId: 'hmt' });
+  data.sessions.push({ id: 'hmtBusy', term: '2026-2027/1', deptId: 'an', kind: 'theory', roomId: 'rad2', day: 0, start: 510, end: 750, groupIds: [] });
+  // جدول سابق لطب الأسنان: محاضرة أضافها المستخدم بنفسه تُستبدل مع الجدول كله
+  data.stages.push({ id: 'dns2', deptId: 'dnd', level: 2, name: 'المرحلة الثانية' });
+  data.groups.push({ id: 'dng2', deptId: 'dnd', stageId: 'dns2', shift: 'morning', name: 'صباحي', students: 0, subgroups: ['A', 'B', 'C'] });
+  data.sessions.push({ id: 'oldManual', term: '2026-2027/1', deptId: 'dnd', kind: 'theory', groupIds: ['dng2'], day: 1, start: 510, end: 630, source: 'manual' });
+  const { ops, report } = universityImportPlan(data, ids());
+  const after = apply(data, ops);
+  assert.ok(!after.sessions.some((s) => s.id === 'oldManual'));
+  assert.ok(report.replacedTimetables >= 1);
+  const room = (id) => after.rooms.find((r) => r.id === id);
+  const den = after.sessions.filter((s) => s.deptId === 'dnd');
+  const lvl = (s) => after.stages.find((x) => x.id === after.groups.find((g) => g.id === s.groupIds[0]).stageId).level;
+  assert.deepEqual([1, 2, 3].map((l) => den.filter((s) => lvl(s) === l).length), [15, 29, 33]);
+  assert.ok(den.every((s) => s.day >= 0 && s.day <= 4 && s.start >= 510 && s.end <= 900));
+  // مواد طب الأسنان النظرية في قاعة الفلوجة، وما خرج منها مواد عامة في قاعات التقنيات الصحية (لا هاشمية الأنبار)
+  const general = ['اللغة العربية', 'حقوق الإنسان', 'مصطلحات طبية', 'جرائم حزب البعث', 'أخلاقيات طب الأسنان', 'حاسوب', 'فيزياء', 'كيمياء', 'بايولوجي'];
+  const subj = (s) => after.subjects.find((x) => x.id === s.subjectId).name;
+  for (const s of den.filter((x) => x.kind === 'theory')) {
+    if (room(s.roomId)?.name !== 'قاعة الفلوجة') assert.ok(general.includes(subj(s)), subj(s));
+    assert.notEqual(room(s.roomId)?.name, 'هاشمية الانبار');
+  }
+  for (const s of den.filter((x) => ['اللغة العربية', 'حقوق الإنسان'].includes(subj(x)))) assert.notEqual(room(s.roomId)?.name, 'قاعة الفلوجة');
+  // القاعة المشغولة لا تُحجز: أي محاضرة كانت لها «قاعة الاشعة 2» السبت صباحاً انتقلت إلى بديل شاغر
+  assert.ok(!den.some((s) => s.roomId === 'rad2' && s.day === 0 && s.start < 750));
+  assert.equal(report.noRoom.length, 0);
+  assert.ok(den.filter((s) => s.sharedRoom).every((s) => room(s.roomId).collegeId === 'hmt'));
+  // لا تضارب ولا تنبيه قاعة كلية أخرى
+  const ctx = buildCtx({ ...after, settings: after.settings[0] });
+  const res = checkAll(after.sessions.filter((s) => s.term === '2026-2027/1'), ctx);
+  for (const s of den) for (const i of res.get(s.id) || []) assert.ok(!['teacher', 'room', 'group', 'roomOwner', 'shift'].includes(i.type), `${subj(s)}: ${i.type} ${i.message}`);
+  // بلا فراغات في يوم أي مجموعة، والنظري قبل العملي لكل مجموعة
+  for (const l of [1, 2, 3]) for (const g of l === 1 ? [null] : ['A', 'B', 'C']) for (let d = 0; d < 5; d++) {
+    const xs = den.filter((s) => lvl(s) === l && s.day === d && (!g || !s.subgroups.length || s.subgroups.includes(g))).sort((a, b) => a.start - b.start);
+    for (let i = 1; i < xs.length; i++) assert.equal(xs[i].start, xs[i - 1].end, `فراغ: المرحلة ${l} ${g || ''} يوم ${d}`);
+  }
+  for (const p of den.filter((s) => s.kind === 'practical')) {
+    const t = den.find((s) => s.kind === 'theory' && s.subjectId === p.subjectId);
+    if (t) assert.ok(p.day * 10000 + p.start >= t.day * 10000 + t.end, `${subj(p)}: العملي قبل النظري`);
+  }
+  assert.equal(universityImportPlan(after, ids()).ops.length, 0);
+});
