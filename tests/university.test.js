@@ -414,7 +414,7 @@ test('v8: Forensic Evidence stage 1 added as in its timetable, with its halls; s
   assert.equal(universityImportPlan(after, ids()).ops.length, 0);
 });
 
-test('v10: Dentistry — stage 1 theory in SE008, stages 2–3 theory in Fallujah hall, practical groups rotate; no clash, no gaps, theory before practical', () => {
+test('v11: Dentistry — stages 2–3 exactly as the college sent them, stage 1 theory in SE008; no teacher, hall or group clash', () => {
   const data = base();
   // جدول سابق لطب الأسنان: محاضرة أضافها المستخدم بنفسه تُستبدل مع الجدول كله
   data.stages.push({ id: 'dns2', deptId: 'dnd', level: 2, name: 'المرحلة الثانية' });
@@ -427,26 +427,38 @@ test('v10: Dentistry — stage 1 theory in SE008, stages 2–3 theory in Falluja
   const room = (id) => after.rooms.find((r) => r.id === id);
   const den = after.sessions.filter((s) => s.deptId === 'dnd');
   const lvl = (s) => after.stages.find((x) => x.id === after.groups.find((g) => g.id === s.groupIds[0]).stageId).level;
-  assert.deepEqual([1, 2, 3].map((l) => den.filter((s) => lvl(s) === l).length), [15, 29, 33]);
-  assert.ok(den.every((s) => s.day >= 0 && s.day <= 4 && s.start >= 510 && s.end <= 870));
-  // القاعات بطلب الكلية
   const subj = (s) => after.subjects.find((x) => x.id === s.subjectId).name;
-  for (const s of den.filter((x) => x.kind === 'theory')) {
+  assert.deepEqual([1, 2, 3].map((l) => den.filter((s) => lvl(s) === l).length), [15, 29, 33]);
+  // نماذج من الجدولين المرسلين كما هما
+  const find = (l, name, kind, day, start, subs = []) => den.find((s) => lvl(s) === l && subj(s) === name && s.kind === kind && s.day === day && s.start === start && s.subgroups.join('') === subs.join(''));
+  assert.equal(room(find(3, 'Conservative (تيجان وجسور)', 'theory', 0, 510).roomId).name, 'قاعة الفلوجة');
+  assert.equal(room(find(3, 'Conservative (تيجان وجسور)', 'practical', 0, 630, ['C']).roomId).name, 'SM 114');
+  assert.ok(find(3, 'X-ray (الأشعة)', 'practical', 1, 810, ['C']));
+  assert.equal(room(find(2, 'تشريح عام', 'practical', 0, 510, ['A']).roomId).name, 'SM 101');
+  assert.ok(!den.some((s) => lvl(s) === 2 && s.day === 4), 'الأربعاء عطلة للمرحلة الثانية');
+  // جرائم حزب البعث (الاثنين 2:30) في SE008 لأن قاعة الفلوجة لطب أسنان مجتمعي في وقتها
+  const baath = find(2, 'جرائم حزب البعث', 'theory', 2, 870);
+  assert.equal(room(baath.roomId).name, 'SE008');
+  assert.ok(baath.sharedRoom);
+  // القاعات: الأولى في SE008، والثانية والثالثة في قاعة الفلوجة (عدا جرائم البعث)
+  for (const s of den.filter((x) => x.kind === 'theory' && x !== baath)) {
     assert.equal(room(s.roomId)?.name, lvl(s) === 1 ? 'SE008' : 'قاعة الفلوجة', `${subj(s)} م${lvl(s)}`);
   }
-  // SE008 قاعة الهندسية: محجوزة بالاتفاق فلا يظهر تنبيه «قاعة كلية أخرى»
   assert.ok(den.filter((s) => lvl(s) === 1 && s.kind === 'theory').every((s) => s.sharedRoom));
   assert.equal(report.noRoom.length, 0);
+  // لا تضارب أستاذ أو قاعة أو مجموعة لأي محاضرة في طب الأسنان
   const ctx = buildCtx({ ...after, settings: after.settings[0] });
   const res = checkAll(after.sessions.filter((s) => s.term === '2026-2027/1'), ctx);
-  for (const s of den) for (const i of res.get(s.id) || []) assert.ok(!['teacher', 'room', 'group', 'roomOwner', 'shift'].includes(i.type), `${subj(s)}: ${i.type} ${i.message}`);
-  // بلا فراغات في يوم أي مجموعة، والنظري قبل العملي لكل مجموعة
-  for (const l of [1, 2, 3]) for (const g of l === 1 ? [null] : ['A', 'B', 'C']) for (let d = 0; d < 5; d++) {
-    const xs = den.filter((s) => lvl(s) === l && s.day === d && (!g || !s.subgroups.length || s.subgroups.includes(g))).sort((a, b) => a.start - b.start);
-    for (let i = 1; i < xs.length; i++) assert.equal(xs[i].start, xs[i - 1].end, `فراغ: المرحلة ${l} ${g || ''} يوم ${d}`);
+  for (const s of den) for (const i of res.get(s.id) || []) assert.ok(!['teacher', 'room', 'group', 'roomOwner'].includes(i.type), `${subj(s)}: ${i.type} ${i.message}`);
+  // المرحلة الأولى: 8:30–2:30 بلا فراغات، والنظري قبل العملي
+  const st1 = den.filter((s) => lvl(s) === 1);
+  assert.ok(st1.every((s) => s.start >= 510 && s.end <= 870));
+  for (let d = 0; d < 5; d++) {
+    const xs = st1.filter((s) => s.day === d).sort((a, b) => a.start - b.start);
+    for (let i = 1; i < xs.length; i++) assert.equal(xs[i].start, xs[i - 1].end, `فراغ في المرحلة الأولى يوم ${d}`);
   }
-  for (const p of den.filter((s) => s.kind === 'practical')) {
-    const t = den.find((s) => s.kind === 'theory' && s.subjectId === p.subjectId);
+  for (const p of st1.filter((s) => s.kind === 'practical')) {
+    const t = st1.find((s) => s.kind === 'theory' && s.subjectId === p.subjectId);
     if (t) assert.ok(p.day * 10000 + p.start >= t.day * 10000 + t.end, `${subj(p)}: العملي قبل النظري`);
   }
   assert.equal(universityImportPlan(after, ids()).ops.length, 0);

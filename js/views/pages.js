@@ -44,7 +44,7 @@ export function renderDashboard(container) {
   const page = el(`<div class="page">
     <div class="page-head"><h2>لوحة التحكم</h2>${cur ? `<span class="term-badge">🏛 ${esc(collegeName(cur))}</span>` : ''}<span class="term-badge">${esc(termLabel())}</span></div>
     ${universityImportPending() ? `<div class="banner info uimp-banner"><span>🏛 ${universityImportIsUpdate()
-      ? '<b>تحديث بيانات الجامعة جاهز:</b> جداول طب الأسنان — نظري المرحلة الأولى في القاعة SE008، ونظري الثانية والثالثة في قاعة الفلوجة، ومجاميع العملي موزعة — بلا أي تعارض بين الأساتذة أو القاعات أو المختبرات.'
+      ? '<b>تحديث بيانات الجامعة جاهز:</b> جدولا طب الأسنان للمرحلتين الثانية والثالثة كما أرسلتهما الكلية، والمرحلة الأولى في القاعة SE008 — بلا تعارض بين الأساتذة أو القاعات أو المختبرات.'
       : '<b>جداول كليات الجامعة جاهزة للاستيراد:</b> الكلية التقنية الهندسية (ومنها النفط والغاز والأجهزة الطبية)، والإدارة والاقتصاد، والصيدلة، وطب الأسنان، والقانون والعلوم السياسية، والعلوم — بموادها وكادرها وقاعاتها المرمّزة ومحاضرات كل قسم ومرحلة.'}</span>
       <button class="btn btn-primary btn-sm" id="uimp">معاينة و${universityImportIsUpdate() ? 'تحديث' : 'استيراد'}</button></div>` : ''}
     ${isAdmin() && (daysSinceBackup === null || daysSinceBackup > 7) ? `<div class="banner warn">💾 ${daysSinceBackup === null ? 'لم تُؤخذ نسخة احتياطية بعد.' : `آخر نسخة احتياطية قبل ${daysSinceBackup} يوم.`} <a href="#/settings">خذ نسخة الآن</a></div>` : ''}
