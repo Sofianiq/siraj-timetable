@@ -253,7 +253,7 @@ test('v3 update: Law and Forensic Evidence timetables are added and halls follow
   assert.equal(universityImportPlan(after, ids()).ops.length, 0);
 });
 
-test('v12: Construction stage 1 in three groups A, B, C, each split into two subgroups for practicals; own hall per group, shared teachers, no clash, no gaps', () => {
+test('v13: Construction stage 1 in three groups A, B, C (subgroups for practicals), each subject once a week; own hall per group, shared teachers, no clash, no gaps', () => {
   const withOld = (edited) => {
     const d = base();
     d.departments.push({ id: 'cons', name: 'قسم هندسة تقنيات البناء والانشاءات', collegeId: 'en' });
@@ -285,14 +285,18 @@ test('v12: Construction stage 1 in three groups A, B, C, each split into two sub
   for (const k of 'ABC') {
     const xs = after.sessions.filter((s) => s.groupIds.includes(G[k].id));
     cons.push(...xs);
-    assert.equal(xs.length, 17, k);
+    assert.equal(xs.length, 11, k);   // 5 نظري للمجموعة + 3 عملي لكل مجموعة فرعية
+    // كل مادة مرة واحدة في الأسبوع: نظري واحد للمجموعة، وعملي واحد لكل مجموعة فرعية
+    const seen = new Set();
+    for (const x of xs) { const key = `${x.subjectId}|${x.kind}|${x.subgroups.join('')}`; assert.ok(!seen.has(key), `تكرار في ${k}`); seen.add(key); }
     // النظري للمجموعة كاملة، والعملي لمجموعة فرعية واحدة
     assert.ok(xs.filter((s) => s.kind === 'theory').every((s) => !s.subgroups.length && room(s.roomId) === HOME[k]));
     assert.ok(xs.filter((s) => s.kind === 'practical').every((s) => s.subgroups.length === 1 && [`${k}1`, `${k}2`].includes(s.subgroups[0])));
     assert.ok(xs.every((s) => [HOME[k], 'مختبر الرسم الهندسي'].includes(room(s.roomId))));
     for (const sub of [`${k}1`, `${k}2`]) {
       const mine = xs.filter((s) => !s.subgroups.length || s.subgroups.includes(sub));
-      assert.equal(mine.reduce((n, s) => n + (s.end - s.start) / 60, 0), 23, sub);
+      assert.equal(mine.reduce((n, s) => n + (s.end - s.start) / 60, 0), 15, sub);
+      assert.ok(new Set(mine.map((s) => s.day)).size <= 3, `${sub}: أكثر من 3 أيام`);
       for (let d = 0; d < 5; d++) {
         const day = mine.filter((s) => s.day === d).sort((a, b) => a.start - b.start);
         for (let i = 1; i < day.length; i++) assert.equal(day[i].start, day[i - 1].end, `فراغ: ${sub} يوم ${d}`);
