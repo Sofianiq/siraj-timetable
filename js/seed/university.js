@@ -174,7 +174,7 @@ export function universityImportPlan(data, uid, { replace = false } = {}) {
   }
 
   // جداول تُستبدل بالكامل (مثل طب الأسنان): كل محاضرات شعبها في الفصل غير الواردة في البيانات تُحذف، ولو عُدّلت أو أُضيفت يدوياً
-  const replacedGids = new Set(REPLACED_GROUPS.map(([p, l, sh]) => groupId[`${p}|${l}|${sh}|`]).filter(Boolean));
+  const replacedGids = new Set(REPLACED_GROUPS.map(([p, l, sh, nm]) => groupId[`${p}|${l}|${sh}|${nm || ''}`]).filter(Boolean));
   const replacedOld = (data.sessions || []).filter((s) => (s.term || '') === term && !datasetIds.has(s.id) && (s.groupIds || []).some((g) => replacedGids.has(g)));
   for (const s of replacedOld) removable.add(s.id);
 

@@ -253,7 +253,7 @@ test('v3 update: Law and Forensic Evidence timetables are added and halls follow
   assert.equal(universityImportPlan(after, ids()).ops.length, 0);
 });
 
-test('v4: Construction stage 1 morning becomes groups A and B with a hall each, a shared time grid and no teacher clash; the old timetable is retired unless edited', () => {
+test('v12: Construction stage 1 in three groups A, B, C, each split into two subgroups for practicals; own hall per group, shared teachers, no clash, no gaps', () => {
   const withOld = (edited) => {
     const d = base();
     d.departments.push({ id: 'cons', name: 'قسم هندسة تقنيات البناء والانشاءات', collegeId: 'en' });
@@ -267,49 +267,57 @@ test('v4: Construction stage 1 morning becomes groups A and B with a hall each, 
     if (edited) d.sessions.push(old('old3', 2, 510, { start: 540 }));  // عدّله المستخدم بعد الاستيراد
     return d;
   };
-  // 1) الجدول القديم بلا تعديل: يُحذف، والشعبة «صباحي» تصبح «المجموعة A» بعدد طلبتها، وتُنشأ «المجموعة B»
+  // 1) الجدول السابق بلا تعديل: يُحذف، والشعبة «صباحي» تصبح «المجموعة A» بعدد طلبتها، وتُنشأ B وC
   const data = withOld(false);
   const { ops, report } = universityImportPlan(data, ids());
   const after = apply(data, ops);
   assert.ok(!after.sessions.some((s) => /^old/.test(s.id)));
   assert.equal(report.removed.length, 2);
   const gA = after.groups.find((g) => g.id === 'consg');
-  assert.deepEqual([gA.name, gA.students, gA.subgroups], ['المجموعة A', 40, []]);
-  const gB = after.groups.find((g) => g.stageId === 'conss1' && g.name === 'المجموعة B');
-  assert.ok(gB);
+  assert.deepEqual([gA.name, gA.students], ['المجموعة A', 40]);
+  assert.ok(['A1', 'A2'].every((x) => gA.subgroups.includes(x)));
+  const G = { A: gA, B: after.groups.find((g) => g.stageId === 'conss1' && g.name === 'المجموعة B'), C: after.groups.find((g) => g.stageId === 'conss1' && g.name === 'المجموعة C') };
+  assert.deepEqual(G.B.subgroups, ['B1', 'B2']);
+  assert.deepEqual(G.C.subgroups, ['C1', 'C2']);
   const room = (id) => after.rooms.find((r) => r.id === id)?.name;
-  const of = (g) => after.sessions.filter((s) => s.groupIds.includes(g.id));
-  const A = of(gA), B = of(gB);
-  assert.equal(A.length, 12);
-  assert.equal(B.length, 12);
-  const hours = (l) => l.reduce((n, s) => n + (s.end - s.start) / 60, 0);
-  assert.equal(hours(A), 23);
-  assert.equal(hours(B), 23);
-  // لكل مجموعة قاعتها، والرسم الهندسي في مختبره
-  assert.ok(A.every((s) => [ 'SE202', 'مختبر الرسم الهندسي' ].includes(room(s.roomId))));
-  assert.ok(B.every((s) => [ 'SE209', 'مختبر الرسم الهندسي' ].includes(room(s.roomId))));
-  // شبكة وقت واحدة: حصص المجموعتين (عدا حقوق الإنسان) في الأوقات نفسها، وكل يوم المواد نفسها
-  const grid = (l) => l.filter((s) => s.teacherId).map((s) => `${s.day}-${s.start}`).sort().join();
-  assert.equal(grid(A), grid(B));
-  for (let d = 0; d < 5; d++) {
-    const subj = (l) => l.filter((s) => s.day === d).map((s) => `${s.subjectId}${s.kind}`).sort().join();
-    assert.equal(subj(A), subj(B));
+  const HOME = { A: 'SE202', B: 'SE209', C: 'SE211' };
+  const cons = [];
+  for (const k of 'ABC') {
+    const xs = after.sessions.filter((s) => s.groupIds.includes(G[k].id));
+    cons.push(...xs);
+    assert.equal(xs.length, 17, k);
+    // النظري للمجموعة كاملة، والعملي لمجموعة فرعية واحدة
+    assert.ok(xs.filter((s) => s.kind === 'theory').every((s) => !s.subgroups.length && room(s.roomId) === HOME[k]));
+    assert.ok(xs.filter((s) => s.kind === 'practical').every((s) => s.subgroups.length === 1 && [`${k}1`, `${k}2`].includes(s.subgroups[0])));
+    assert.ok(xs.every((s) => [HOME[k], 'مختبر الرسم الهندسي'].includes(room(s.roomId))));
+    for (const sub of [`${k}1`, `${k}2`]) {
+      const mine = xs.filter((s) => !s.subgroups.length || s.subgroups.includes(sub));
+      assert.equal(mine.reduce((n, s) => n + (s.end - s.start) / 60, 0), 23, sub);
+      for (let d = 0; d < 5; d++) {
+        const day = mine.filter((s) => s.day === d).sort((a, b) => a.start - b.start);
+        for (let i = 1; i < day.length; i++) assert.equal(day[i].start, day[i - 1].end, `فراغ: ${sub} يوم ${d}`);
+      }
+      for (const p of mine.filter((s) => s.kind === 'practical')) {
+        const t = mine.find((s) => s.kind === 'theory' && s.subjectId === p.subjectId);
+        if (t) assert.ok(p.day * 10000 + p.start >= t.day * 10000 + t.end, `${sub}: العملي قبل النظري`);
+      }
+    }
   }
-  // داخل وقت الدوام 8:30–3:00 ولا تضارب أستاذ أو قاعة أو شعبة مع أي محاضرة أخرى
-  assert.ok([...A, ...B].every((s) => s.start >= 510 && s.end <= 900));
+  assert.ok(cons.every((s) => s.start >= 510 && s.end <= 870));
+  assert.ok(!cons.some((s) => ['SE203', 'SE207'].includes(room(s.roomId))));
+  // لا تضارب أستاذ أو قاعة أو مجموعة، ولا تنبيه قاعة
   const ctx = buildCtx({ ...after, settings: after.settings[0] });
-  const term = after.sessions.filter((s) => s.term === '2026-2027/1');
-  const res = checkAll(term, ctx);
-  for (const s of [...A, ...B]) for (const i of res.get(s.id) || []) assert.ok(!['teacher', 'room', 'group', 'roomOwner'].includes(i.type), i.message);
+  const res = checkAll(after.sessions.filter((s) => s.term === '2026-2027/1'), ctx);
+  for (const s of cons) for (const i of res.get(s.id) || []) assert.ok(!['teacher', 'room', 'group', 'roomOwner', 'roomType'].includes(i.type), i.message);
   assert.equal(universityImportPlan(after, ids()).ops.length, 0);
-  // 2) محاضرة قديمة عدّلها المستخدم: تبقى، ولا تُحوَّل شعبتها، فتُنشأ المجموعتان A وB جديدتين
+  // 2) محاضرة قديمة عدّلها المستخدم: تبقى، ولا تُحوَّل شعبتها، فتُنشأ المجاميع الثلاث جديدة
   const d2 = withOld(true);
   const p2 = universityImportPlan(d2, ids());
   const a2 = apply(d2, p2.ops);
   assert.equal(p2.report.keptEdited.length, 1);
   assert.ok(a2.sessions.some((s) => s.id === 'old3'));
   assert.equal(a2.groups.find((g) => g.id === 'consg').name, 'صباحي');
-  assert.deepEqual(a2.groups.filter((g) => g.stageId === 'conss1' && g.shift === 'morning').map((g) => g.name).sort(), ['المجموعة A', 'المجموعة B', 'صباحي']);
+  assert.deepEqual(a2.groups.filter((g) => g.stageId === 'conss1' && g.shift === 'morning').map((g) => g.name).sort(), ['المجموعة A', 'المجموعة B', 'المجموعة C', 'صباحي']);
 });
 
 test('v5: Oil & Gas timetable with a hall per stage and no clash; Construction evening removed; hall practicals and separate theory', () => {
